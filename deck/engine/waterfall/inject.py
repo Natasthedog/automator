@@ -35,6 +35,7 @@ from ..pptx.text import replace_placeholders_strict, replace_text_in_slide_prese
 from .compute import WaterfallPayload, _align_label_values, _build_waterfall_chart_data, _chart_data_from_payload, _format_lab_base_value, compute_waterfall_payloads_for_all_labels
 from .resolve import _resolve_target_level_label_for_slide
 from .targets import _normalize_column_name, _target_level_labels_from_gathered_df_with_filters
+from .validate import validate_payloads_or_raise
 
 def _capture_label_columns(ws, series_names: list[str]) -> dict[int, dict[str, list]]:
     label_columns: dict[int, dict[str, list]] = {}
@@ -711,6 +712,7 @@ def populate_category_waterfall(
         template_chart,
         target_labels=labels,
     )
+    validate_payloads_or_raise(payloads_by_label, labels)
 
     seen_partnames: set[str] = set()
     remaining_labels = labels.copy()
