@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Deck Automation (MVP){% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>Deck Automation (MVP)</h1>
+    <p class="helper-text">
+        Upload your inputs below to generate a deck. We will wire up processing next.
+    </p>
+
+    <form class="form-grid" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div>
+            <label for="template_pptx">Template PPTX upload</label>
+            <input id="template_pptx" name="template_pptx" type="file" accept=".pptx">
+        </div>
+        <div>
+            <label for="gathered_cn10">gatheredCN10 upload</label>
+            <input id="gathered_cn10" name="gathered_cn10" type="file" accept=".xlsx,.xls,.csv">
+        </div>
+        <div>
+            <label for="scope_workbook">scope workbook upload (optional)</label>
+            <input id="scope_workbook" name="scope_workbook" type="file" accept=".xlsx,.xls,.csv">
+        </div>
+        <div>
+            <button type="submit">Submit</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
