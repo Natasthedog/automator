@@ -33,7 +33,7 @@ def _build_template_chart():
 
 
 def test_payloads_differ_across_labels():
-    gathered_df = pd.read_csv(Path("tests/fixtures/gathered_min.csv"))
+    gathered_df = pd.read_excel(Path("tests/fixtures/gathered_min.xlsx"))
     template_chart = _build_template_chart()
 
     payloads = compute_waterfall_payloads_for_all_labels(
