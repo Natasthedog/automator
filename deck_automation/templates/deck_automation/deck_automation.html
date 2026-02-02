@@ -9,6 +9,30 @@
         Upload your inputs below to generate a deck. We will wire up processing next.
     </p>
 
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if computed_count %}
+        <div class="summary">
+            <h2>Computed {{ computed_count }} label(s)</h2>
+            <ul>
+                {% for summary in payload_summaries %}
+                    <li>
+                        <strong>{{ summary.label }}</strong> —
+                        {{ summary.category_count }} categories,
+                        checksum {{ summary.checksum|floatformat:2 }}
+                    </li>
+                {% endfor %}
+            </ul>
+            {% if download_id %}
+                <a class="button" href="{% url 'deck-automation-download' download_id %}">
+                    Download payloads JSON
+                </a>
+            {% endif %}
+        </div>
+    {% endif %}
+
     <form class="form-grid" method="post" enctype="multipart/form-data">
         {% csrf_token %}
         <div>
@@ -17,11 +41,11 @@
         </div>
         <div>
             <label for="gathered_cn10">gatheredCN10 upload</label>
-            <input id="gathered_cn10" name="gathered_cn10" type="file" accept=".xlsx,.xls,.csv">
+            <input id="gathered_cn10" name="gathered_cn10" type="file" accept=".xlsx,.xls,.xlsb,.csv">
         </div>
         <div>
             <label for="scope_workbook">scope workbook upload (optional)</label>
-            <input id="scope_workbook" name="scope_workbook" type="file" accept=".xlsx,.xls,.csv">
+            <input id="scope_workbook" name="scope_workbook" type="file" accept=".xlsx,.xlsb">
         </div>
         <div>
             <button type="submit">Submit</button>
