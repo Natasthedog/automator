@@ -1,15 +1,12 @@
 import logging
 
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 
 logger = logging.getLogger(__name__)
 PROJECT_TEMPLATES = {}
 
 def home(request):
-    return render(request, "deck/home.html")
-
-def home(request):
-    return render(request, "deck/home.html")
+    return redirect("deck-automation")
 
 def generate_deck(
     n_clicks,
