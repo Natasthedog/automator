@@ -732,6 +732,37 @@ def _payload_checksum(series_values: list[tuple[str, list[float]]]) -> float:
     return checksum
 
 
+def _filtered_gathered_row_count(
+    gathered_df: pd.DataFrame | None,
+    target_level_label: str,
+) -> int:
+    if gathered_df is None or gathered_df.empty:
+        return 0
+    header_row = gathered_df.iloc[0] if len(gathered_df) else None
+    data_start_idx = 0
+    try:
+        target_col, data_start_idx, _ = _resolve_column_from_candidates(
+            gathered_df,
+            header_row,
+            ["Target Level Label", "Target Level"],
+            context="Target Level Label",
+        )
+    except ValueError as exc:
+        logger.info(
+            "Could not resolve Target Level Label column for row counts: %s",
+            exc,
+        )
+        target_col = None
+    data_df = gathered_df.iloc[data_start_idx:]
+    if not target_col:
+        return len(data_df)
+    normalized_target = _normalize_text_value(target_level_label)
+    if not normalized_target:
+        return len(data_df)
+    target_series = data_df[target_col].map(_normalize_text_value)
+    return int(target_series.eq(normalized_target).sum())
+
+
 def _chart_data_from_payload(payload: WaterfallPayload) -> ChartData:
     cd = ChartData()
     cd.categories = payload.categories
@@ -803,10 +834,13 @@ def compute_waterfall_payloads_for_all_labels(
             template_chart,
         )
         payloads_by_label[label] = payload
+        row_count = _filtered_gathered_row_count(gathered_df, label)
+        checksum = _payload_checksum(payload.series_values)
         logger.info(
-            "Computed waterfall payload for %r: %d categories, checksum %.2f",
+            "Computed waterfall payload for %r: %d categories, %d rows, checksum %.2f",
             label,
             len(payload.categories),
-            _payload_checksum(payload.series_values),
+            row_count,
+            checksum,
         )
     return payloads_by_label

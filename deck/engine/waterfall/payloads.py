@@ -28,6 +28,8 @@ from lxml import etree
 
 logger = logging.getLogger(__name__)
 
+from .compute import _payload_checksum
+
 def _json_safe(x):
     try:
         import numpy as np
@@ -41,6 +43,8 @@ def _json_safe(x):
 def _to_jsonable(value):
     if is_dataclass(value):
         value = asdict(value)
+    elif hasattr(value, "__dict__"):
+        value = value.__dict__
     if isinstance(value, dict):
         return {str(key): _to_jsonable(val) for key, val in value.items()}
     if isinstance(value, (list, tuple, set)):
@@ -49,4 +53,12 @@ def _to_jsonable(value):
 
 
 def _waterfall_payloads_to_json(payloads_by_label: dict[str, "WaterfallPayload"]) -> str:
-    return json.dumps(_to_jsonable(payloads_by_label), indent=2, ensure_ascii=False)
+    payloads_json = {}
+    for label, payload in payloads_by_label.items():
+        payload_dict = _to_jsonable(payload)
+        if not isinstance(payload_dict, dict):
+            payload_dict = {"value": payload_dict}
+        checksum = _payload_checksum(getattr(payload, "series_values", []))
+        payload_dict["checksum"] = checksum
+        payloads_json[str(label)] = payload_dict
+    return json.dumps(payloads_json, indent=2, ensure_ascii=False)
