@@ -8,6 +8,9 @@ PROJECT_TEMPLATES = {}
 def home(request):
     return render(request, "deck/home.html")
 
+def home(request):
+    return render(request, "deck/home.html")
+
 def generate_deck(
     n_clicks,
     data_contents,
