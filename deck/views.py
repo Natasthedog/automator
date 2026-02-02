@@ -1,7 +1,9 @@
-from django.http import HttpResponse
 from django.shortcuts import render
 from .engine.io_readers import read_gathered_df
 from .engine.waterfall.debug import build_waterfall_payloads_json
+
+def home(request):
+    return render(request, "deck/home.html")
 
 def generate_deck(
     n_clicks,
