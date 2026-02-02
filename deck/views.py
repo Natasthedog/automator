@@ -1,6 +1,12 @@
+import logging
+
 from django.shortcuts import render
-from .engine.io_readers import read_gathered_df
-from .engine.waterfall.debug import build_waterfall_payloads_json
+
+logger = logging.getLogger(__name__)
+PROJECT_TEMPLATES = {}
+
+def home(request):
+    return render(request, "deck/home.html")
 
 def home(request):
     return render(request, "deck/home.html")
@@ -15,6 +21,18 @@ def generate_deck(
     waterfall_targets,
     bucket_data,
 ):
+    from dash import dcc, no_update
+
+    from .engine.build import build_pptx_from_template
+    from .engine.io_readers import (
+        df_from_contents,
+        product_description_df_from_contents,
+        project_details_df_from_contents,
+        scope_df_from_contents,
+    )
+    from .engine.project_details import _project_detail_value_from_df
+    from .engine.waterfall.targets import target_brand_from_scope_df
+
     if not data_contents or not project_name:
         return no_update, "Please upload the data file and select a project."
 
@@ -101,6 +119,17 @@ def download_waterfall_payloads(
     waterfall_targets,
     bucket_data,
 ):
+    import io
+
+    from dash import dcc, no_update
+    from pptx import Presentation
+
+    from .engine.io_readers import df_from_contents, scope_df_from_contents
+    from .engine.pptx.charts import _waterfall_chart_from_slide
+    from .engine.waterfall.compute import compute_waterfall_payloads_for_all_labels
+    from .engine.waterfall.inject import _available_waterfall_template_slides
+    from .engine.waterfall.payloads import _waterfall_payloads_to_json
+
     if not data_contents or not project_name:
         return no_update, "Please upload the data file and select a project."
 
