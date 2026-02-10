@@ -7,22 +7,17 @@ import uuid
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
 
-from deck.engine.pptx.charts import _waterfall_chart_from_slide
-from deck.engine.pptx.slides import _find_slide_by_marker
 from pptx import Presentation
 
-from .services.readers import read_df, read_scope_df
-from .services.waterfall_payloads import (
-    compute_waterfall_payloads_for_all_labels,
-    payload_checksum,
-    waterfall_payloads_to_json,
-)
 
 logger = logging.getLogger(__name__)
 SESSION_PAYLOADS_KEY = "deck_automation_payloads"
 
 
 def _template_chart_from_pptx(uploaded_file):
+    from deck.engine.pptx.charts import _waterfall_chart_from_slide
+    from deck.engine.pptx.slides import _find_slide_by_marker
+
     data = uploaded_file.read()
     uploaded_file.seek(0)
     prs = Presentation(io.BytesIO(data))
@@ -42,6 +37,13 @@ def deck_automation(request):
             context["error"] = "Please upload the gatheredCN10 file to continue."
         else:
             try:
+                from .services.readers import read_df, read_scope_df
+                from .services.waterfall_payloads import (
+                    compute_waterfall_payloads_for_all_labels,
+                    payload_checksum,
+                    waterfall_payloads_to_json,
+                )
+
                 gathered_df = read_df(gathered_file)
                 scope_df = read_scope_df(scope_file) if scope_file else None
                 template_chart = None
