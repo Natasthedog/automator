@@ -13,6 +13,10 @@
         <p class="error">{{ error }}</p>
     {% endif %}
 
+    {% if message %}
+        <p class="helper-text">{{ message }}</p>
+    {% endif %}
+
     {% if computed_count %}
         <div class="summary">
             <h2>Computed {{ computed_count }} label(s)</h2>
