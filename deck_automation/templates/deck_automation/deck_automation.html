@@ -6,7 +6,7 @@
 <div class="card">
     <h1>Deck Automation (MVP)</h1>
     <p class="helper-text">
-        Select one of the built-in templates (MMx, MMM, or PnP), upload gatheredCN10 (required), and optionally upload a scope workbook.
+        Select one of the built-in templates (MMx, MMM, or PnP). Upload files on the File Uploads page first.
     </p>
 
     {% if error %}
@@ -47,7 +47,7 @@
         </div>
     {% endif %}
 
-    <form class="form-grid" method="post" enctype="multipart/form-data">
+    <form class="form-grid" method="post">
         {% csrf_token %}
         <div>
             <label for="template_choice">Deck template</label>
@@ -57,15 +57,6 @@
                 {% endfor %}
             </select>
         </div>
-        <div>
-            <label for="gathered_cn10">gatheredCN10 upload</label>
-            <input id="gathered_cn10" name="gathered_cn10" type="file" accept=".xlsx,.xls,.xlsb,.csv">
-        </div>
-        <div>
-            <label for="scope_workbook">scope workbook upload (optional)</label>
-            <input id="scope_workbook" name="scope_workbook" type="file" accept=".xlsx,.xlsb">
-        </div>
-
         <div>
             <label for="year1">Bucket comparison year 1</label>
             <input id="year1" name="year1" type="text" value="{{ year1_value }}" placeholder="Year1">

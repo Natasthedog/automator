@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+from base64 import b64decode, b64encode
 from pathlib import Path
 from uuid import uuid4
 
 from django.conf import settings
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from pptx import Presentation
@@ -26,7 +28,7 @@ from deck_automation.services.waterfall_payloads import (
 logger = logging.getLogger(__name__)
 
 SESSION_PAYLOADS_KEY = "deck_automation_payloads"
-WATERFALL_TEMPLATE_MARKER = "<Waterfall Template>"
+SESSION_UPLOADS_KEY = "deck_automation_uploads"
 TEMPLATE_OPTIONS = {
     "MMx": "MMx.pptx",
     "MMM": "MMM.pptx",
@@ -69,6 +71,53 @@ def _default_template_chart():
     )
     return chart_shape.chart
 
+
+def _store_upload(request, key: str, uploaded_file):
+    if uploaded_file is None:
+        return
+    request.session.setdefault(SESSION_UPLOADS_KEY, {})[key] = {
+        "name": uploaded_file.name,
+        "content": b64encode(uploaded_file.read()).decode("ascii"),
+    }
+    request.session.modified = True
+
+
+def _stored_upload(request, key: str):
+    uploads = request.session.get(SESSION_UPLOADS_KEY, {})
+    entry = uploads.get(key)
+    if not entry:
+        return None
+    return SimpleUploadedFile(
+        entry["name"],
+        b64decode(entry["content"]),
+    )
+
+
+def file_uploads(request):
+    context: dict[str, object] = {}
+    uploads = request.session.get(SESSION_UPLOADS_KEY, {})
+    context["has_gathered_upload"] = "gathered_cn10" in uploads
+    context["has_scope_upload"] = "scope_workbook" in uploads
+
+    if request.method == "POST":
+        gathered_file = request.FILES.get("gathered_cn10")
+        scope_file = request.FILES.get("scope_workbook")
+
+        if not gathered_file:
+            context["error"] = "Please upload the gatheredCN10 file to continue."
+            return render(request, "deck_automation/file_uploads.html", context)
+
+        _store_upload(request, "gathered_cn10", gathered_file)
+        if scope_file:
+            _store_upload(request, "scope_workbook", scope_file)
+
+        context["message"] = "Uploads saved. Continue to Deck Automation."
+        uploads = request.session.get(SESSION_UPLOADS_KEY, {})
+        context["has_gathered_upload"] = "gathered_cn10" in uploads
+        context["has_scope_upload"] = "scope_workbook" in uploads
+
+    return render(request, "deck_automation/file_uploads.html", context)
+
 def deck_automation(request):
     context: dict[str, object] = {
         "template_options": sorted(TEMPLATE_OPTIONS.keys()),
@@ -78,8 +127,8 @@ def deck_automation(request):
         "bucket_config_json": "",
     }
     if request.method == "POST":
-        gathered_file = request.FILES.get("gathered_cn10")
-        scope_file = request.FILES.get("scope_workbook")
+        gathered_file = _stored_upload(request, "gathered_cn10")
+        scope_file = _stored_upload(request, "scope_workbook")
         selected_template = request.POST.get("template_choice", "").strip() or "MMx"
         context["selected_template"] = selected_template
 
@@ -93,7 +142,7 @@ def deck_automation(request):
         template_filename = TEMPLATE_OPTIONS.get(selected_template, "MMx.pptx")
 
         if not gathered_file:
-            context["error"] = "Please upload the gatheredCN10 file to continue."
+            context["error"] = "Please upload files on the File Uploads page to continue."
             return render(request, "deck_automation/deck_automation.html", context)
 
         try:

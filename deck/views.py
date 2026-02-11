@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 PROJECT_TEMPLATES = {}
 
 def home(request):
-    return redirect("deck-automation")
+    return redirect("file-uploads")
 
 
 def product_description(request):
