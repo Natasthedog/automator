@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from uuid import uuid4
 
 from django.http import Http404, HttpResponse
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 SESSION_PAYLOADS_KEY = "deck_automation_payloads"
 WATERFALL_TEMPLATE_MARKER = "<Waterfall Template>"
+TEMPLATE_OPTIONS = {
+    "MMx": "MMx.pptx",
+    "MMM": "MMM.pptx",
+    "PnP": "PnP.pptx",
+}
 
 
 def _shape_matches_marker(shape, marker_text: str) -> bool:
@@ -48,20 +54,34 @@ def _find_template_chart(template_pptx):
 
 
 def deck_automation(request):
-    context: dict[str, object] = {}
+    context: dict[str, object] = {
+        "template_options": sorted(TEMPLATE_OPTIONS.keys()),
+        "selected_template": "MMx",
+    }
     if request.method == "POST":
         gathered_file = request.FILES.get("gathered_cn10")
         scope_file = request.FILES.get("scope_workbook")
-        template_file = request.FILES.get("template_pptx")
+        selected_template = request.POST.get("template_choice", "").strip()
+        context["selected_template"] = selected_template
+
+        template_filename = TEMPLATE_OPTIONS.get(selected_template)
+        if not template_filename:
+            context["error"] = "Please select a deck template to continue."
+            return render(request, "deck_automation/deck_automation.html", context)
 
         if not gathered_file:
             context["error"] = "Please upload the gatheredCN10 file to continue."
             return render(request, "deck_automation/deck_automation.html", context)
 
         try:
+            template_path = Path(__file__).resolve().parent / "templates" / "deck_automation" / template_filename
+            if not template_path.exists():
+                raise FileNotFoundError(f"Template not found: {template_filename}")
+
             gathered_df = read_df(gathered_file)
             scope_df = read_scope_df(scope_file)
-            template_chart = _find_template_chart(template_file)
+            with template_path.open("rb") as template_file:
+                template_chart = _find_template_chart(template_file)
             payloads_by_label = compute_waterfall_payloads_for_all_labels(
                 gathered_df,
                 scope_df,
@@ -92,6 +112,7 @@ def deck_automation(request):
                     "payload_summaries": summaries,
                     "download_id": download_id,
                     "message": "Payload computation complete.",
+                    "selected_template": selected_template,
                 }
             )
         except Exception as exc:  # noqa: BLE001
