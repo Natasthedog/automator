@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}File Uploads{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>File Uploads</h1>
+    <p class="helper-text">
+        Upload gatheredCN10 (required) and scope workbook (optional) once. Other pages will reuse these files.
+    </p>
+
+    {% if error %}
+        <p class="error">{{ error }}</p>
+    {% endif %}
+
+    {% if message %}
+        <p class="helper-text">{{ message }}</p>
+    {% endif %}
+
+    <div class="summary">
+        <h2>Current upload status</h2>
+        <ul>
+            <li>gatheredCN10: {% if has_gathered_upload %}Uploaded{% else %}Not uploaded{% endif %}</li>
+            <li>scope workbook: {% if has_scope_upload %}Uploaded{% else %}Not uploaded{% endif %}</li>
+        </ul>
+    </div>
+
+    <form class="form-grid" method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div>
+            <label for="gathered_cn10">gatheredCN10 upload</label>
+            <input id="gathered_cn10" name="gathered_cn10" type="file" accept=".xlsx,.xls,.xlsb,.csv" required>
+        </div>
+        <div>
+            <label for="scope_workbook">scope workbook upload (optional)</label>
+            <input id="scope_workbook" name="scope_workbook" type="file" accept=".xlsx,.xls,.xlsb">
+        </div>
+        <div>
+            <button type="submit">Save uploads</button>
+            <a class="button" href="{% url 'deck-automation' %}">Go to Deck Automation</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
