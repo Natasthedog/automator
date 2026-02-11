@@ -3,6 +3,8 @@ import io
 import logging
 from itertools import combinations
 
+import pandas as pd
+from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from openpyxl import load_workbook
 
@@ -23,6 +25,88 @@ def _product_list_columns_from_sheet(workbook_bytes: bytes, sheet_name: str) -> 
         if values:
             return values
     return []
+
+
+def _normalized_text(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return "".join(ch for ch in text.lower() if ch.isalnum())
+
+
+def _find_column_name(columns: list[str], target: str) -> str | None:
+    normalized_target = _normalized_text(target)
+    normalized_columns = {_normalized_text(column): column for column in columns}
+    if normalized_target in normalized_columns:
+        return normalized_columns[normalized_target]
+    for normalized_column, column in normalized_columns.items():
+        if normalized_target in normalized_column or normalized_column in normalized_target:
+            return column
+    return None
+
+
+def _sheet_df_from_workbook(workbook_bytes: bytes, sheet_name: str) -> pd.DataFrame:
+    return pd.read_excel(io.BytesIO(workbook_bytes), sheet_name=sheet_name, dtype=object)
+
+
+def _first_non_empty_by_group(group: pd.Series):
+    for value in group:
+        if pd.notna(value) and str(value).strip():
+            return value
+    return None
+
+
+def _build_product_description_df(
+    correspondence_df: pd.DataFrame,
+    product_list_df: pd.DataFrame,
+    rollups: list[str],
+    alias_map: dict[str, str],
+    ppg_id_column: str,
+    ppg_name_column: str,
+    correspondence_mapping_column: str,
+    product_list_mapping_column: str,
+) -> tuple[pd.DataFrame, int]:
+    left = correspondence_df.copy()
+    right = product_list_df.copy()
+
+    left["__mapping_key"] = left[correspondence_mapping_column].map(_normalized_text)
+    right["__mapping_key"] = right[product_list_mapping_column].map(_normalized_text)
+    right_rollup_columns = [rollup for rollup in rollups if rollup in right.columns]
+
+    merged = left.merge(
+        right[["__mapping_key", *right_rollup_columns]],
+        on="__mapping_key",
+        how="left",
+    )
+    match_count = int((merged["__mapping_key"] != "").sum() - merged[right_rollup_columns].isna().all(axis=1).sum()) if right_rollup_columns else 0
+
+    grouped = (
+        merged.groupby([ppg_id_column, ppg_name_column], dropna=False)[right_rollup_columns]
+        .agg(_first_non_empty_by_group)
+        .reset_index()
+    )
+
+    rename_map = {rollup: alias_map.get(rollup, rollup) for rollup in right_rollup_columns}
+    grouped = grouped.rename(columns=rename_map)
+    return grouped, match_count
+
+
+def _updated_scope_workbook_bytes(
+    workbook_bytes: bytes,
+    sheet_name: str,
+    product_description_df: pd.DataFrame,
+) -> bytes:
+    workbook = load_workbook(io.BytesIO(workbook_bytes))
+    if sheet_name in workbook.sheetnames:
+        workbook.remove(workbook[sheet_name])
+    worksheet = workbook.create_sheet(title=sheet_name)
+    worksheet.append(list(product_description_df.columns))
+    for row in product_description_df.itertuples(index=False):
+        worksheet.append(list(row))
+
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 def _normalized_rollups(rollups: list[str]) -> list[str]:
@@ -56,9 +140,13 @@ def product_description(request):
     context: dict[str, object] = {
         "sheet_names": [],
         "product_list_columns": [],
+        "ppg_sheet_columns": [],
         "selected_rollups": request.session.get(PRODUCT_DESCRIPTION_ROLLUPS_KEY, []),
         "selected_rollup_aliases": request.session.get(PRODUCT_DESCRIPTION_ROLLUP_ALIASES_KEY, {}),
         "selected_sheet": "",
+        "selected_ppg_sheet": "",
+        "selected_product_list_mapping_column": "",
+        "selected_ppg_mapping_column": "",
         "selected_rollup_pairs": [],
     }
 
@@ -77,8 +165,14 @@ def product_description(request):
     if request.method == "POST":
         uploaded_scope = request.FILES.get("scope_workbook")
         selected_sheet = (request.POST.get("product_list_sheet") or "").strip()
+        selected_ppg_sheet = (request.POST.get("ppg_correspondence_sheet") or "").strip()
         submitted_rollups = _normalized_rollups(request.POST.getlist("rollups"))
         submitted_aliases = request.POST.getlist("rollup_aliases")
+        selected_product_list_mapping_column = (
+            request.POST.get("product_list_mapping_column") or ""
+        ).strip()
+        selected_ppg_mapping_column = (request.POST.get("ppg_mapping_column") or "").strip()
+        action = (request.POST.get("action") or "").strip().lower()
 
         if uploaded_scope:
             scope_bytes = uploaded_scope.read()
@@ -100,7 +194,11 @@ def product_description(request):
             if not selected_sheet:
                 selected_sheet = _find_sheet_by_candidates(sheet_names, "Product_List") or ""
 
+        if not selected_ppg_sheet:
+            selected_ppg_sheet = _find_sheet_by_candidates(sheet_names, "PPG_EAN_CORRESPONDENCE") or ""
+
         context["selected_sheet"] = selected_sheet
+        context["selected_ppg_sheet"] = selected_ppg_sheet
 
         if not selected_sheet:
             context["warning"] = (
@@ -113,8 +211,21 @@ def product_description(request):
             context["error"] = "The selected Product List sheet does not exist in this workbook."
             return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
 
+        if not selected_ppg_sheet:
+            context["warning"] = (
+                "We could not identify the PPG_EAN_CORRESPONDENCE sheet automatically. "
+                "Please choose which sheet contains PPG_ID, PPG_NAME and EAN."
+            )
+            return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+        if selected_ppg_sheet not in sheet_names:
+            context["error"] = "The selected PPG_EAN_CORRESPONDENCE sheet does not exist in this workbook."
+            return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
         columns = _product_list_columns_from_sheet(scope_bytes, selected_sheet)
+        ppg_columns = _product_list_columns_from_sheet(scope_bytes, selected_ppg_sheet)
         context["product_list_columns"] = columns
+        context["ppg_sheet_columns"] = ppg_columns
 
         if submitted_rollups:
             alias_map = _rollup_alias_map(submitted_rollups, submitted_aliases)
@@ -128,6 +239,73 @@ def product_description(request):
                 {"value": rollup, "alias": alias_map.get(rollup, rollup)}
                 for rollup in submitted_rollups
             ]
+
+        context["selected_product_list_mapping_column"] = selected_product_list_mapping_column
+        context["selected_ppg_mapping_column"] = selected_ppg_mapping_column
+
+        if action == "generate_scope":
+            saved_rollups = _normalized_rollups(request.session.get(PRODUCT_DESCRIPTION_ROLLUPS_KEY, []))
+            if not saved_rollups:
+                context["error"] = "Please save at least one roll up before generating the PRODUCT_DESCRIPTION sheet."
+                return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+            alias_map = request.session.get(PRODUCT_DESCRIPTION_ROLLUP_ALIASES_KEY, {})
+            product_df = _sheet_df_from_workbook(scope_bytes, selected_sheet)
+            correspondence_df = _sheet_df_from_workbook(scope_bytes, selected_ppg_sheet)
+
+            ppg_id_column = _find_column_name(list(correspondence_df.columns), "PPG_ID")
+            ppg_name_column = _find_column_name(list(correspondence_df.columns), "PPG_NAME")
+            if not ppg_id_column or not ppg_name_column:
+                context["error"] = "Could not find PPG_ID and/or PPG_NAME columns in the selected PPG sheet."
+                return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+            auto_ppg_mapping_column = _find_column_name(list(correspondence_df.columns), "EAN")
+            correspondence_mapping_column = selected_ppg_mapping_column or auto_ppg_mapping_column
+            if not correspondence_mapping_column:
+                context["warning"] = (
+                    "Could not find the EAN column in PPG_EAN_CORRESPONDENCE. "
+                    "Please identify the mapping column in that sheet."
+                )
+                return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+            auto_product_mapping_column = _find_column_name(list(product_df.columns), "EAN")
+            product_mapping_column = selected_product_list_mapping_column or auto_product_mapping_column
+            if not product_mapping_column:
+                context["warning"] = (
+                    "Could not find the mapping column in Product List. "
+                    "Please identify which Product List column maps to PPG_EAN_CORRESPONDENCE."
+                )
+                return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+            product_description_df, match_count = _build_product_description_df(
+                correspondence_df,
+                product_df,
+                saved_rollups,
+                alias_map,
+                ppg_id_column,
+                ppg_name_column,
+                correspondence_mapping_column,
+                product_mapping_column,
+            )
+
+            if match_count <= 0:
+                context["warning"] = (
+                    "Could not find matches between Product List and PPG_EAN_CORRESPONDENCE using selected mapping columns. "
+                    "Please identify the correct mapping column(s)."
+                )
+                return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+            updated_scope = _updated_scope_workbook_bytes(
+                scope_bytes,
+                "PRODUCT_DESCRIPTION",
+                product_description_df,
+            )
+            response = HttpResponse(
+                updated_scope,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            response["Content-Disposition"] = 'attachment; filename="scope_with_product_description.xlsx"'
+            return response
 
     return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
 
