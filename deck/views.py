@@ -8,6 +8,10 @@ PROJECT_TEMPLATES = {}
 def home(request):
     return redirect("deck-automation")
 
+
+def product_description(request):
+    return render(request, "deck/PRODUCT_DESCRIPTION.html")
+
 def generate_deck(
     n_clicks,
     data_contents,
