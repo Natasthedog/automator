@@ -26,6 +26,23 @@ class ProductDescriptionViewTests(TestCase):
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+    def _scope_upload_with_rows(self, sheets: dict[str, list[list[object]]]) -> SimpleUploadedFile:
+        workbook = Workbook()
+        default = workbook.active
+        workbook.remove(default)
+        for sheet_name, rows in sheets.items():
+            worksheet = workbook.create_sheet(title=sheet_name)
+            for row in rows:
+                worksheet.append(row)
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        return SimpleUploadedFile(
+            "scope.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
     def test_product_description_prompts_for_sheet_when_product_list_not_found(self):
         response = self.client.post(
             reverse("product-description"),
@@ -74,3 +91,45 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "Rename roll up")
         self.assertContains(response, "Manu_Brand")
         self.assertContains(response, "Brand_Sub")
+        self.assertContains(response, "PPG_EAN_CORRESPONDENCE sheet")
+        self.assertContains(response, "Generate PRODUCT_DESCRIPTION & Download Scope")
+
+    def test_generate_scope_downloads_product_description_sheet(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "Manufacturer", "Brand", "Manufacturer_Brand"],
+                            ["111", "Mfr A", "Brand A", "Mfr A_Brand A"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN"],
+                            ["P1", "PPG One", "111"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollups": ["Manufacturer_Brand"],
+                "rollup_aliases": ["MANU_BRAND"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn(
+            'attachment; filename="scope_with_product_description.xlsx"',
+            response["Content-Disposition"],
+        )

@@ -25,7 +25,7 @@
         <div>
             <label for="scope_workbook">Scope workbook</label>
             <input id="scope_workbook" type="file" name="scope_workbook" accept=".xlsx,.xlsb" />
-            <p class="helper-text">Upload (or re-upload) your workbook to inspect Product List roll-up options.</p>
+            <p class="helper-text">Upload (or re-upload) your workbook to inspect Product List roll-up options and build PRODUCT_DESCRIPTION.</p>
         </div>
 
         {% if sheet_names %}
@@ -41,6 +41,44 @@
             </div>
         {% endif %}
 
+
+        {% if sheet_names %}
+            <div>
+                <label for="ppg_correspondence_sheet">PPG_EAN_CORRESPONDENCE sheet</label>
+                <select id="ppg_correspondence_sheet" name="ppg_correspondence_sheet">
+                    <option value="">-- Select sheet --</option>
+                    {% for sheet_name in sheet_names %}
+                        <option value="{{ sheet_name }}" {% if selected_ppg_sheet == sheet_name %}selected{% endif %}>{{ sheet_name }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">If auto-detection misses PPG_EAN_CORRESPONDENCE, pick it manually.</p>
+            </div>
+        {% endif %}
+
+
+
+        {% if product_list_columns and ppg_sheet_columns %}
+            <div>
+                <label for="product_list_mapping_column">Product List mapping column</label>
+                <select id="product_list_mapping_column" name="product_list_mapping_column">
+                    <option value="">-- Try auto (EAN) --</option>
+                    {% for column in product_list_columns %}
+                        <option value="{{ column }}" {% if selected_product_list_mapping_column == column %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">Used to map Product List rows to PPG_EAN_CORRESPONDENCE (defaults to EAN).</p>
+            </div>
+            <div>
+                <label for="ppg_mapping_column">PPG_EAN_CORRESPONDENCE mapping column</label>
+                <select id="ppg_mapping_column" name="ppg_mapping_column">
+                    <option value="">-- Try auto (EAN) --</option>
+                    {% for column in ppg_sheet_columns %}
+                        <option value="{{ column }}" {% if selected_ppg_mapping_column == column %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">Used to map PPG rows to Product List (defaults to EAN).</p>
+            </div>
+        {% endif %}
         {% if product_list_columns %}
             <div>
                 <label>Build roll ups</label>
@@ -66,7 +104,8 @@
         {% endif %}
 
         <div>
-            <button type="submit">Load / Save Roll Ups</button>
+            <button type="submit" name="action" value="save_rollups">Load / Save Roll Ups</button>
+            <button type="submit" name="action" value="generate_scope" style="margin-left:0.5rem;">Generate PRODUCT_DESCRIPTION & Download Scope</button>
         </div>
     </form>
 </div>
