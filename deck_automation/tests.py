@@ -92,9 +92,9 @@ class DeckAutomationViewsTests(TestCase):
         prs = Presentation()
         slide = prs.slides.add_slide(prs.slide_layouts[6])
         chart_data = ChartData()
-        chart_data.categories = ["Placeholder"]
+        chart_data.categories = ["<earliest date>", "Bridge", "<latest date>"]
         for name in ["Base", "Promo", "Media", "Blanks", "Positives", "Negatives"]:
-            chart_data.add_series(name, (0,))
+            chart_data.add_series(name, (0, 0, 0))
         chart_shape = slide.shapes.add_chart(
             XL_CHART_TYPE.COLUMN_STACKED,
             Inches(1),
@@ -141,7 +141,7 @@ class DeckAutomationViewsTests(TestCase):
 
         self.assertIn("Alpha", payloads)
         payload = payloads["Alpha"]
-        self.assertEqual(payload.categories, ["Placeholder"])
+        self.assertEqual(len(payload.categories), 3)
         self.assertEqual(payload.base_values, (100.0, 110.0))
 
     def test_read_df_detects_header_row_on_row_2_for_excel(self):
@@ -175,6 +175,7 @@ class DeckAutomationViewsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Deck Automation (MVP)")
+        self.assertContains(response, "Bucket config JSON")
 
     def test_root_redirects_to_deck_automation(self):
         response = self.client.get("/")
@@ -197,6 +198,30 @@ class DeckAutomationViewsTests(TestCase):
         response = self.client.post(
             reverse("deck-automation"),
             data={"gathered_cn10": self._csv_upload()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Computed")
+
+
+    def test_post_accepts_bucket_config_json(self):
+        bucket_config_json = json.dumps(
+            {
+                "Price": {
+                    "target_labels": ["Own", "Cross"],
+                    "subheaders_included": ["Base"],
+                }
+            }
+        )
+        response = self.client.post(
+            reverse("deck-automation"),
+            data={
+                "gathered_cn10": self._csv_upload(),
+                "template_choice": "MMx",
+                "year1": "Year1",
+                "year2": "Year2",
+                "bucket_config_json": bucket_config_json,
+            },
         )
 
         self.assertEqual(response.status_code, 200)

@@ -65,6 +65,20 @@
             <label for="scope_workbook">scope workbook upload (optional)</label>
             <input id="scope_workbook" name="scope_workbook" type="file" accept=".xlsx,.xlsb">
         </div>
+
+        <div>
+            <label for="year1">Bucket comparison year 1</label>
+            <input id="year1" name="year1" type="text" value="{{ year1_value }}" placeholder="Year1">
+        </div>
+        <div>
+            <label for="year2">Bucket comparison year 2</label>
+            <input id="year2" name="year2" type="text" value="{{ year2_value }}" placeholder="Year2">
+        </div>
+        <div>
+            <label for="bucket_config_json">Bucket config JSON (optional)</label>
+            <textarea id="bucket_config_json" name="bucket_config_json" rows="6" placeholder='{"Price": {"target_labels": ["Own", "Cross"], "subheaders_included": ["Price"]}}'>{{ bucket_config_json }}</textarea>
+            <p class="helper-text">Choose which buckets are calculated by listing each bucket key with target labels and gathered columns.</p>
+        </div>
         <div>
             <button type="submit">Submit</button>
         </div>

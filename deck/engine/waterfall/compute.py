@@ -508,6 +508,43 @@ def _waterfall_series_from_gathered_df(
     return categories, series_values, label_values
 
 
+
+def _apply_bucket_categories(
+    categories: list[str],
+    bucket_labels: list[str],
+    base_indices: tuple[int, int],
+) -> tuple[list[str], tuple[int, int]]:
+    if not bucket_labels:
+        return categories, base_indices
+    start_idx, end_idx = base_indices
+    insert_at = start_idx + 1
+    updated = list(categories[:insert_at]) + list(bucket_labels) + list(categories[insert_at:])
+    return updated, (start_idx, end_idx + len(bucket_labels))
+
+
+
+def _apply_bucket_values(
+    values: list[float],
+    base_indices: tuple[int, int],
+    bucket_values: list[float],
+) -> list[float]:
+    if not bucket_values:
+        return values
+    start_idx = base_indices[0]
+    insert_at = start_idx + 1
+    return list(values[:insert_at]) + list(bucket_values) + list(values[insert_at:])
+
+def _apply_bucket_placeholders(
+    values: list[float],
+    base_indices: tuple[int, int] | None,
+    bucket_count: int,
+) -> list[float]:
+    if bucket_count <= 0 or base_indices is None:
+        return values
+    start_idx = base_indices[0]
+    insert_at = start_idx + 1
+    return list(values[:insert_at]) + ([0.0] * bucket_count) + list(values[insert_at:])
+
 def _build_waterfall_chart_data(
     chart,
     scope_df: pd.DataFrame | None,
@@ -785,6 +822,55 @@ def _chart_data_from_payload(payload: WaterfallPayload) -> ChartData:
     return cd
 
 
+def _derive_bucket_labels_and_values(
+    gathered_df: pd.DataFrame | None,
+    target_level_label: str | None,
+    bucket_data: dict | None,
+) -> tuple[list[str], list[float]]:
+    if not bucket_data:
+        return [], []
+    explicit_labels = list(bucket_data.get("labels") or [])
+    explicit_values = [float(value) for value in list(bucket_data.get("values") or [])]
+    if explicit_labels and explicit_values:
+        bucket_len = min(len(explicit_labels), len(explicit_values))
+        return explicit_labels[:bucket_len], explicit_values[:bucket_len]
+
+    bucket_config = bucket_data.get("bucket_config") or {}
+    year1 = bucket_data.get("year1")
+    year2 = bucket_data.get("year2")
+    if gathered_df is None or gathered_df.empty or not bucket_config or not year1 or not year2:
+        return [], []
+
+    target_level_col = _find_column_by_candidates(gathered_df, ["Target Level Label", "Target Level"])
+    target_label_col = _find_column_by_candidates(gathered_df, ["Target Label", "Target", "Target Type"])
+    year_col = _find_column_by_candidates(gathered_df, ["Year", "Model Year"])
+    if not target_level_col or not target_label_col or not year_col or not target_level_label:
+        return [], []
+
+    filtered_df = gathered_df.copy()
+    normalized_target = _normalize_text_value(target_level_label)
+    target_series = filtered_df[target_level_col].map(_normalize_text_value)
+    filtered_df = filtered_df[target_series == normalized_target]
+    if filtered_df.empty:
+        return [], []
+
+    metadata = {
+        "target_label_id": target_label_col,
+        "year_id": year_col,
+        "group_order": list(bucket_config.keys()),
+    }
+    deltas = _compute_bucket_deltas(
+        filtered_df,
+        metadata,
+        bucket_config,
+        str(year1),
+        str(year2),
+    )
+    labels = [label for label, _ in deltas]
+    values = [float(value) for _, value in deltas]
+    return labels, values
+
+
 def compute_payload_for_label(
     gathered_df: pd.DataFrame,
     scope_df: pd.DataFrame | None,
@@ -794,6 +880,11 @@ def compute_payload_for_label(
 ) -> WaterfallPayload:
     if template_chart is None:
         raise ValueError("Template chart is required to compute waterfall payloads.")
+    bucket_labels, bucket_values = _derive_bucket_labels_and_values(
+        gathered_df,
+        target_level_label,
+        bucket_data,
+    )
     (
         _,
         categories,
@@ -806,8 +897,8 @@ def compute_payload_for_label(
         scope_df,
         gathered_df,
         target_level_label,
-        bucket_data.get("labels") if bucket_data else None,
-        bucket_data.get("values") if bucket_data else None,
+        bucket_labels,
+        bucket_values,
         year1=bucket_data.get("year1") if bucket_data else None,
         year2=bucket_data.get("year2") if bucket_data else None,
     )
