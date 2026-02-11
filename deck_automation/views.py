@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from uuid import uuid4
 
+from django.conf import settings
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from pptx import Presentation
+from pptx.chart.data import ChartData
+from pptx.enum.chart import XL_CHART_TYPE
+from pptx.util import Inches
+
+from deck.engine.pptx.charts import _waterfall_chart_from_slide
+from deck.engine.waterfall.inject import _available_waterfall_template_slides
 
 from deck_automation.services.readers import read_df, read_scope_df
 from deck_automation.services.waterfall_payloads import (
@@ -26,48 +34,63 @@ TEMPLATE_OPTIONS = {
 }
 
 
-def _shape_matches_marker(shape, marker_text: str) -> bool:
-    marker_text = marker_text.strip()
-    shape_name = getattr(shape, "name", "") or ""
-    if marker_text and marker_text in shape_name:
-        return True
-    if shape.has_text_frame:
-        return marker_text in (shape.text_frame.text or "")
-    return False
-
-
-def _find_template_chart(template_pptx):
-    if template_pptx is None:
+def _find_template_chart(template_source):
+    if template_source is None:
         return None
-    template_pptx.seek(0)
-    prs = Presentation(template_pptx)
+    prs = Presentation(template_source)
+    available_slides = _available_waterfall_template_slides(prs)
+    if available_slides:
+        chart = _waterfall_chart_from_slide(available_slides[0][1], "Waterfall Template")
+        if chart is not None:
+            return chart
+    logger.info("Falling back to first chart found in template deck.")
     for slide in prs.slides:
-        if not any(_shape_matches_marker(shape, WATERFALL_TEMPLATE_MARKER) for shape in slide.shapes):
-            continue
         for shape in slide.shapes:
             if shape.has_chart:
                 return shape.chart
-        logger.info("Found waterfall template slide marker but no chart shape.")
-        return None
-    logger.info("No <Waterfall Template> marker found in uploaded template.")
     return None
 
+
+
+def _default_template_chart():
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    chart_data = ChartData()
+    chart_data.categories = ["<earliest date>", "Bridge", "<latest date>"]
+    for name in ["Base", "Promo", "Media", "Blanks", "Positives", "Negatives"]:
+        chart_data.add_series(name, (0, 0, 0))
+    chart_shape = slide.shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_STACKED,
+        Inches(1),
+        Inches(1),
+        Inches(6),
+        Inches(3),
+        chart_data,
+    )
+    return chart_shape.chart
 
 def deck_automation(request):
     context: dict[str, object] = {
         "template_options": sorted(TEMPLATE_OPTIONS.keys()),
         "selected_template": "MMx",
+        "year1_value": "Year1",
+        "year2_value": "Year2",
+        "bucket_config_json": "",
     }
     if request.method == "POST":
         gathered_file = request.FILES.get("gathered_cn10")
         scope_file = request.FILES.get("scope_workbook")
-        selected_template = request.POST.get("template_choice", "").strip()
+        selected_template = request.POST.get("template_choice", "").strip() or "MMx"
         context["selected_template"] = selected_template
 
-        template_filename = TEMPLATE_OPTIONS.get(selected_template)
-        if not template_filename:
-            context["error"] = "Please select a deck template to continue."
-            return render(request, "deck_automation/deck_automation.html", context)
+        year1_value = request.POST.get("year1", "Year1").strip() or "Year1"
+        year2_value = request.POST.get("year2", "Year2").strip() or "Year2"
+        bucket_config_json = request.POST.get("bucket_config_json", "").strip()
+        context["year1_value"] = year1_value
+        context["year2_value"] = year2_value
+        context["bucket_config_json"] = bucket_config_json
+
+        template_filename = TEMPLATE_OPTIONS.get(selected_template, "MMx.pptx")
 
         if not gathered_file:
             context["error"] = "Please upload the gatheredCN10 file to continue."
@@ -80,12 +103,23 @@ def deck_automation(request):
 
             gathered_df = read_df(gathered_file)
             scope_df = read_scope_df(scope_file)
-            with template_path.open("rb") as template_file:
-                template_chart = _find_template_chart(template_file)
+            template_chart = _find_template_chart(str(template_path)) or _default_template_chart()
+
+            bucket_data = None
+            if bucket_config_json:
+                bucket_config = json.loads(bucket_config_json)
+                if not isinstance(bucket_config, dict):
+                    raise ValueError("Bucket config must be a JSON object keyed by bucket label.")
+                bucket_data = {
+                    "year1": year1_value,
+                    "year2": year2_value,
+                    "bucket_config": bucket_config,
+                }
+
             payloads_by_label = compute_waterfall_payloads_for_all_labels(
                 gathered_df,
                 scope_df,
-                bucket_data=None,
+                bucket_data=bucket_data,
                 template_chart=template_chart,
             )
             payload_json = waterfall_payloads_to_json(payloads_by_label)
@@ -105,6 +139,14 @@ def deck_automation(request):
                         "checksum": payload_checksum(payload),
                     }
                 )
+
+
+            if settings.DEBUG:
+                first_label = next(iter(payloads_by_label), None)
+                first_payload_categories = payloads_by_label[first_label].categories[:5] if first_label else []
+                context["debug_gathered_header_row_index"] = gathered_df.attrs.get("detected_header_row_index")
+                context["debug_gathered_columns"] = list(gathered_df.columns)
+                context["debug_first_payload_categories"] = first_payload_categories
 
             context.update(
                 {
