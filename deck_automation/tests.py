@@ -9,6 +9,7 @@ from django.test import TestCase
 from django.urls import reverse
 
 from deck_automation.services.readers import read_df
+from deck_automation.services.waterfall_payloads import compute_waterfall_payloads_for_all_labels
 
 
 class DeckAutomationViewsTests(TestCase):
@@ -91,6 +92,62 @@ class DeckAutomationViewsTests(TestCase):
         self.assertIn("Target Level Label", xlsx_df.columns)
         self.assertEqual(len(csv_df), 4)
         self.assertEqual(len(xlsx_df), 4)
+
+    def test_payloads_accept_alias_headers_and_embedded_header_row(self):
+        gathered_df = pd.DataFrame(
+            [
+                {
+                    "Target Level": "Target Level",
+                    "Target": "Target",
+                    "Model Year": "Model Year",
+                    "Actual": "Actual",
+                    "Variable Name": "Variable Name",
+                    "Base": "Base",
+                    "Promotion": "Promotion",
+                    "Media": "Media",
+                    "Blank": "Blank",
+                    "Positive": "Positive",
+                    "Negative": "Negative",
+                },
+                {
+                    "Target Level": "Alpha",
+                    "Target": "Own",
+                    "Model Year": "Year1",
+                    "Actual": 100,
+                    "Variable Name": "Var1",
+                    "Base": 10,
+                    "Promotion": 2,
+                    "Media": 3,
+                    "Blank": 4,
+                    "Positive": 5,
+                    "Negative": -6,
+                },
+                {
+                    "Target Level": "Alpha",
+                    "Target": "Own",
+                    "Model Year": "Year2",
+                    "Actual": 110,
+                    "Variable Name": "Var1",
+                    "Base": 11,
+                    "Promotion": 2,
+                    "Media": 3,
+                    "Blank": 4,
+                    "Positive": 5,
+                    "Negative": -6,
+                },
+            ]
+        )
+
+        payloads = compute_waterfall_payloads_for_all_labels(
+            gathered_df,
+            scope_df=None,
+            bucket_data=None,
+        )
+
+        self.assertIn("Alpha", payloads)
+        payload = payloads["Alpha"]
+        self.assertEqual(payload.categories, ["Year1", "Year2"])
+        self.assertEqual(payload.base_values, (100.0, 110.0))
 
     def test_deck_automation_page_loads(self):
         response = self.client.get(reverse("deck-automation"))
