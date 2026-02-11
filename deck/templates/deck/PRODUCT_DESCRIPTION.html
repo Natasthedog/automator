@@ -9,6 +9,59 @@
         Roll Up levels depend on how the Product Description data is set up, so please
         confirm the Product Description sheet structure before configuring roll-up mappings.
     </p>
-    <p class="helper-text">This page is reserved for product description content.</p>
+
+    {% if error %}
+        <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+    {% if warning %}
+        <p class="helper-text" style="color:#92400e;">{{ warning }}</p>
+    {% endif %}
+    {% if message %}
+        <p class="helper-text" style="color:#166534;">{{ message }}</p>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+        {% csrf_token %}
+        <div>
+            <label for="scope_workbook">Scope workbook</label>
+            <input id="scope_workbook" type="file" name="scope_workbook" accept=".xlsx,.xlsb" />
+            <p class="helper-text">Upload (or re-upload) your workbook to inspect Product List roll-up options.</p>
+        </div>
+
+        {% if sheet_names %}
+            <div>
+                <label for="product_list_sheet">Product List sheet</label>
+                <select id="product_list_sheet" name="product_list_sheet">
+                    <option value="">-- Select sheet --</option>
+                    {% for sheet_name in sheet_names %}
+                        <option value="{{ sheet_name }}" {% if selected_sheet == sheet_name %}selected{% endif %}>{{ sheet_name }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">If auto-detection misses the Product List, pick the correct sheet manually.</p>
+            </div>
+        {% endif %}
+
+        {% if rollup_options %}
+            <div>
+                <label>Choose roll ups (single or joined)</label>
+                {% for option in rollup_options %}
+                    <div>
+                        <label style="font-weight:400; margin-bottom:0;">
+                            <input type="checkbox" name="rollups" value="{{ option }}" {% if option in selected_rollups %}checked{% endif %} />
+                            {{ option }}
+                        </label>
+                    </div>
+                {% endfor %}
+                <p class="helper-text">
+                    Joined roll ups are generated from Product List columns (for example,
+                    Manufacturer_Brand and Brand_Subbrand).
+                </p>
+            </div>
+        {% endif %}
+
+        <div>
+            <button type="submit">Load Product List Options</button>
+        </div>
+    </form>
 </div>
 {% endblock %}
