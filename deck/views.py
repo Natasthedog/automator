@@ -1,6 +1,7 @@
 import base64
 import io
 import logging
+from itertools import combinations
 
 from django.shortcuts import redirect, render
 from openpyxl import load_workbook
