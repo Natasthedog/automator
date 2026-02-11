@@ -829,46 +829,57 @@ def _derive_bucket_labels_and_values(
 ) -> tuple[list[str], list[float]]:
     if not bucket_data:
         return [], []
+
+    labels_by_target = bucket_data.get("labels_by_target_level") or {}
+    values_by_target = bucket_data.get("values_by_target_level") or {}
+    if target_level_label and isinstance(labels_by_target, dict) and isinstance(values_by_target, dict):
+        scoped_labels = list(labels_by_target.get(target_level_label) or [])
+        scoped_values = [
+            float(value)
+            for value in list(values_by_target.get(target_level_label) or [])
+        ]
+        if scoped_labels and scoped_values:
+            bucket_len = min(len(scoped_labels), len(scoped_values))
+            return scoped_labels[:bucket_len], scoped_values[:bucket_len]
+
     explicit_labels = list(bucket_data.get("labels") or [])
     explicit_values = [float(value) for value in list(bucket_data.get("values") or [])]
-    if explicit_labels and explicit_values:
-        bucket_len = min(len(explicit_labels), len(explicit_values))
-        return explicit_labels[:bucket_len], explicit_values[:bucket_len]
 
     bucket_config = bucket_data.get("bucket_config") or {}
     year1 = bucket_data.get("year1")
     year2 = bucket_data.get("year2")
-    if gathered_df is None or gathered_df.empty or not bucket_config or not year1 or not year2:
-        return [], []
+    if gathered_df is not None and not gathered_df.empty and bucket_config and year1 and year2:
+        target_level_col = _find_column_by_candidates(gathered_df, ["Target Level Label", "Target Level"])
+        target_label_col = _find_column_by_candidates(gathered_df, ["Target Label", "Target", "Target Type"])
+        year_col = _find_column_by_candidates(gathered_df, ["Year", "Model Year"])
+        if target_level_col and target_label_col and year_col and target_level_label:
+            filtered_df = gathered_df.copy()
+            normalized_target = _normalize_text_value(target_level_label)
+            target_series = filtered_df[target_level_col].map(_normalize_text_value)
+            filtered_df = filtered_df[target_series == normalized_target]
+            if not filtered_df.empty:
+                metadata = {
+                    "target_label_id": target_label_col,
+                    "year_id": year_col,
+                    "group_order": list(bucket_config.keys()),
+                }
+                deltas = _compute_bucket_deltas(
+                    filtered_df,
+                    metadata,
+                    bucket_config,
+                    str(year1),
+                    str(year2),
+                )
+                labels = [label for label, _ in deltas]
+                values = [float(value) for _, value in deltas]
+                if labels and values:
+                    return labels, values
 
-    target_level_col = _find_column_by_candidates(gathered_df, ["Target Level Label", "Target Level"])
-    target_label_col = _find_column_by_candidates(gathered_df, ["Target Label", "Target", "Target Type"])
-    year_col = _find_column_by_candidates(gathered_df, ["Year", "Model Year"])
-    if not target_level_col or not target_label_col or not year_col or not target_level_label:
-        return [], []
+    if explicit_labels and explicit_values:
+        bucket_len = min(len(explicit_labels), len(explicit_values))
+        return explicit_labels[:bucket_len], explicit_values[:bucket_len]
 
-    filtered_df = gathered_df.copy()
-    normalized_target = _normalize_text_value(target_level_label)
-    target_series = filtered_df[target_level_col].map(_normalize_text_value)
-    filtered_df = filtered_df[target_series == normalized_target]
-    if filtered_df.empty:
-        return [], []
-
-    metadata = {
-        "target_label_id": target_label_col,
-        "year_id": year_col,
-        "group_order": list(bucket_config.keys()),
-    }
-    deltas = _compute_bucket_deltas(
-        filtered_df,
-        metadata,
-        bucket_config,
-        str(year1),
-        str(year2),
-    )
-    labels = [label for label, _ in deltas]
-    values = [float(value) for _, value in deltas]
-    return labels, values
+    return [], []
 
 
 def compute_payload_for_label(
