@@ -43,14 +43,14 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "Please choose the correct sheet from the list")
         self.assertContains(response, "LookupSheet")
 
-    def test_product_description_allows_joined_rollups_from_selected_sheet(self):
+    def test_product_description_renders_three_rollup_dropdowns_and_saves_rollup(self):
         self.client.post(
             reverse("product-description"),
             data={
                 "scope_workbook": self._scope_upload(
                     {
                         "PRODUCT DESCRIPTION": ["Name", "Value"],
-                        "LookupSheet": ["Manufacturer", "Brand", "Subbrand"],
+                        "Product List": ["Manufacturer", "Brand", "Subbrand"],
                     }
                 )
             },
@@ -58,12 +58,15 @@ class ProductDescriptionViewTests(TestCase):
 
         response = self.client.post(
             reverse("product-description"),
-            data={"product_list_sheet": "LookupSheet"},
+            data={
+                "product_list_sheet": "Product List",
+                "rollups": ["Manufacturer_Brand", "Brand_Subbrand"],
+            },
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Manufacturer")
-        self.assertContains(response, "Brand")
-        self.assertContains(response, "Subbrand")
+        self.assertContains(response, "Build roll ups")
+        self.assertContains(response, "Add another roll up")
+        self.assertContains(response, "repeat(3, minmax(0, 1fr))")
         self.assertContains(response, "Manufacturer_Brand")
         self.assertContains(response, "Brand_Subbrand")
