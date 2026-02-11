@@ -112,6 +112,27 @@ def product_description_df_from_contents(contents, filename):
         )
         if not target_sheet:
             return None
+
+        product_list_sheet = _find_sheet_by_candidates(
+            excel_file.sheet_names, "Product List"
+        )
+        if not product_list_sheet:
+            product_list_sheet = _find_sheet_by_candidates(
+                excel_file.sheet_names, "ProductList"
+            )
+        if not product_list_sheet:
+            product_list_sheet = _find_sheet_by_candidates(
+                excel_file.sheet_names, "Product_List"
+            )
+        if not product_list_sheet:
+            available = ", ".join(excel_file.sheet_names)
+            raise ValueError(
+                "Could not find a Product List sheet. Please identify which sheet "
+                "corresponds to the Product List (looked for Product List, "
+                "ProductList, Product_List). Available sheets: "
+                f"{available}"
+            )
+
         product_df = excel_file.parse(target_sheet)
     if product_df.empty:
         return None
