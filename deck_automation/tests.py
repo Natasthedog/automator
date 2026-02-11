@@ -107,17 +107,27 @@ class DeckAutomationViewsTests(TestCase):
     def test_post_computes_payloads_and_renders_summary(self):
         response = self.client.post(
             reverse("deck-automation"),
-            data={"gathered_cn10": self._csv_upload()},
+            data={"gathered_cn10": self._csv_upload(), "template_choice": "MMx"},
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Computed")
         self.assertContains(response, "Download payloads JSON")
 
+
+    def test_post_requires_template_choice(self):
+        response = self.client.post(
+            reverse("deck-automation"),
+            data={"gathered_cn10": self._csv_upload()},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please select a deck template to continue.")
+
     def test_download_endpoint_returns_json_payloads(self):
         post_response = self.client.post(
             reverse("deck-automation"),
-            data={"gathered_cn10": self._csv_upload()},
+            data={"gathered_cn10": self._csv_upload(), "template_choice": "MMM"},
         )
         self.assertEqual(post_response.status_code, 200)
 

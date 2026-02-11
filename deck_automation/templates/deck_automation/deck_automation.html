@@ -6,7 +6,7 @@
 <div class="card">
     <h1>Deck Automation (MVP)</h1>
     <p class="helper-text">
-        Upload gatheredCN10 (required), plus optional scope/template inputs, to compute waterfall payload JSON.
+        Select one of the built-in templates (MMx, MMM, or PnP), upload gatheredCN10 (required), and optionally upload a scope workbook.
     </p>
 
     {% if error %}
@@ -40,8 +40,12 @@
     <form class="form-grid" method="post" enctype="multipart/form-data">
         {% csrf_token %}
         <div>
-            <label for="template_pptx">Template PPTX upload</label>
-            <input id="template_pptx" name="template_pptx" type="file" accept=".pptx">
+            <label for="template_choice">Deck template</label>
+            <select id="template_choice" name="template_choice" required>
+                {% for option in template_options %}
+                    <option value="{{ option }}" {% if selected_template == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
         </div>
         <div>
             <label for="gathered_cn10">gatheredCN10 upload</label>
