@@ -1,16 +1,106 @@
+import base64
+import io
 import logging
 
 from django.shortcuts import redirect, render
+from openpyxl import load_workbook
+
+from .engine.waterfall.targets import _find_sheet_by_candidates
 
 logger = logging.getLogger(__name__)
 PROJECT_TEMPLATES = {}
+PRODUCT_DESCRIPTION_SCOPE_KEY = "product_description_scope_workbook"
+PRODUCT_DESCRIPTION_ROLLUPS_KEY = "product_description_rollups"
+
+
+def _product_list_columns_from_sheet(workbook_bytes: bytes, sheet_name: str) -> list[str]:
+    workbook = load_workbook(io.BytesIO(workbook_bytes), data_only=True, read_only=True)
+    worksheet = workbook[sheet_name]
+    for row in worksheet.iter_rows(values_only=True):
+        values = [str(cell).strip() for cell in row if cell is not None and str(cell).strip()]
+        if values:
+            return values
+    return []
+
+
+def _normalized_rollups(rollups: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for rollup in rollups:
+        value = (rollup or "").strip().strip("_")
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
 
 def home(request):
     return redirect("file-uploads")
 
 
 def product_description(request):
-    return render(request, "deck/PRODUCT_DESCRIPTION.html")
+    context: dict[str, object] = {
+        "sheet_names": [],
+        "product_list_columns": [],
+        "selected_rollups": request.session.get(PRODUCT_DESCRIPTION_ROLLUPS_KEY, []),
+        "selected_sheet": "",
+    }
+
+    stored_scope = request.session.get(PRODUCT_DESCRIPTION_SCOPE_KEY)
+    scope_bytes: bytes | None = None
+    if stored_scope:
+        scope_bytes = base64.b64decode(stored_scope)
+
+    if request.method == "POST":
+        uploaded_scope = request.FILES.get("scope_workbook")
+        selected_sheet = (request.POST.get("product_list_sheet") or "").strip()
+        submitted_rollups = _normalized_rollups(request.POST.getlist("rollups"))
+
+        if uploaded_scope:
+            scope_bytes = uploaded_scope.read()
+            request.session[PRODUCT_DESCRIPTION_SCOPE_KEY] = base64.b64encode(scope_bytes).decode("ascii")
+            request.session.modified = True
+
+        if not scope_bytes:
+            context["error"] = "Please upload a scope workbook to configure Product Description roll ups."
+            return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+        workbook = load_workbook(io.BytesIO(scope_bytes), data_only=True, read_only=True)
+        sheet_names = workbook.sheetnames
+        context["sheet_names"] = sheet_names
+
+        if not selected_sheet:
+            selected_sheet = _find_sheet_by_candidates(sheet_names, "Product List") or ""
+            if not selected_sheet:
+                selected_sheet = _find_sheet_by_candidates(sheet_names, "ProductList") or ""
+            if not selected_sheet:
+                selected_sheet = _find_sheet_by_candidates(sheet_names, "Product_List") or ""
+
+        context["selected_sheet"] = selected_sheet
+
+        if not selected_sheet:
+            context["warning"] = (
+                "We could not identify the Product List sheet automatically. "
+                "Please choose the correct sheet from the list."
+            )
+            return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+        if selected_sheet not in sheet_names:
+            context["error"] = "The selected Product List sheet does not exist in this workbook."
+            return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
+        columns = _product_list_columns_from_sheet(scope_bytes, selected_sheet)
+        context["product_list_columns"] = columns
+
+        if submitted_rollups:
+            request.session[PRODUCT_DESCRIPTION_ROLLUPS_KEY] = submitted_rollups
+            request.session.modified = True
+            context["selected_rollups"] = submitted_rollups
+            context["message"] = "Roll up selection saved for this session."
+
+    return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
+
 
 def generate_deck(
     n_clicks,
@@ -109,6 +199,7 @@ def generate_deck(
         if not message:
             message = "Unknown error. Check server logs for details."
         return no_update, f"Error ({type(exc).__name__}): {message}"
+
 
 def download_waterfall_payloads(
     n_clicks,

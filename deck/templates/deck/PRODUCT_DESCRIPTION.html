@@ -1,10 +1,164 @@
 {% extends "base.html" %}
 
-{% block title %}PRODUCT_DESCRIPTION{% endblock %}
+{% block title %}Product Description{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h1>PRODUCT_DESCRIPTION</h1>
-    <p class="helper-text">This page is reserved for product description content.</p>
+    <h1>Product Description</h1>
+    <p>
+        Roll Up levels depend on how the Product Description data is set up, so please
+        confirm the Product Description sheet structure before configuring roll-up mappings.
+    </p>
+
+    {% if error %}
+        <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+    {% if warning %}
+        <p class="helper-text" style="color:#92400e;">{{ warning }}</p>
+    {% endif %}
+    {% if message %}
+        <p class="helper-text" style="color:#166534;">{{ message }}</p>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" class="form-grid" id="product-description-form">
+        {% csrf_token %}
+        <div>
+            <label for="scope_workbook">Scope workbook</label>
+            <input id="scope_workbook" type="file" name="scope_workbook" accept=".xlsx,.xlsb" />
+            <p class="helper-text">Upload (or re-upload) your workbook to inspect Product List roll-up options.</p>
+        </div>
+
+        {% if sheet_names %}
+            <div>
+                <label for="product_list_sheet">Product List sheet</label>
+                <select id="product_list_sheet" name="product_list_sheet">
+                    <option value="">-- Select sheet --</option>
+                    {% for sheet_name in sheet_names %}
+                        <option value="{{ sheet_name }}" {% if selected_sheet == sheet_name %}selected{% endif %}>{{ sheet_name }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">If auto-detection misses the Product List, pick the correct sheet manually.</p>
+            </div>
+        {% endif %}
+
+        {% if product_list_columns %}
+            <div>
+                <label>Build roll ups</label>
+                <p class="helper-text">
+                    Use at least two dropdowns per row (up to three). Example: Manufacturer + Brand creates
+                    <strong>Manufacturer_Brand</strong>.
+                </p>
+
+                <div id="rollup-builder"></div>
+                <button type="button" id="add-rollup-row">Add another roll up</button>
+
+                <div id="rollup-values" style="margin-top:1rem;"></div>
+
+                {% if selected_rollups %}
+                    <p class="helper-text" style="margin-top:1rem;">Saved roll ups:</p>
+                    <ul>
+                        {% for rollup in selected_rollups %}
+                            <li>{{ rollup }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <div>
+            <button type="submit">Load / Save Roll Ups</button>
+        </div>
+    </form>
 </div>
+
+{% if product_list_columns %}
+    {{ product_list_columns|json_script:"product-list-columns" }}
+    {{ selected_rollups|json_script:"selected-rollups" }}
+    <script>
+        (function () {
+            const columns = JSON.parse(document.getElementById("product-list-columns").textContent);
+            const selectedRollups = JSON.parse(document.getElementById("selected-rollups").textContent || "[]");
+            const builder = document.getElementById("rollup-builder");
+            const addRowButton = document.getElementById("add-rollup-row");
+            const rollupValues = document.getElementById("rollup-values");
+
+            function buildSelect(selectedValue) {
+                const select = document.createElement("select");
+                const blank = document.createElement("option");
+                blank.value = "";
+                blank.textContent = "-- choose --";
+                select.appendChild(blank);
+                columns.forEach((column) => {
+                    const option = document.createElement("option");
+                    option.value = column;
+                    option.textContent = column;
+                    if (selectedValue === column) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+                return select;
+            }
+
+            function updateHiddenInputs() {
+                rollupValues.innerHTML = "";
+                const rows = builder.querySelectorAll("[data-rollup-row]");
+                rows.forEach((row) => {
+                    const parts = Array.from(row.querySelectorAll("select"))
+                        .map((select) => select.value)
+                        .filter(Boolean);
+                    if (parts.length < 2) {
+                        return;
+                    }
+                    const rollup = parts.join("_");
+                    const chip = document.createElement("p");
+                    chip.className = "helper-text";
+                    chip.textContent = `Will save: ${rollup}`;
+                    rollupValues.appendChild(chip);
+
+                    const input = document.createElement("input");
+                    input.type = "hidden";
+                    input.name = "rollups";
+                    input.value = rollup;
+                    rollupValues.appendChild(input);
+                });
+            }
+
+            function addRow(initialParts) {
+                const row = document.createElement("div");
+                row.setAttribute("data-rollup-row", "1");
+                row.style.display = "grid";
+                row.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr)) auto";
+                row.style.gap = "0.5rem";
+                row.style.marginTop = "0.5rem";
+
+                for (let i = 0; i < 3; i += 1) {
+                    const select = buildSelect(initialParts && initialParts[i] ? initialParts[i] : "");
+                    select.addEventListener("change", updateHiddenInputs);
+                    row.appendChild(select);
+                }
+
+                const removeButton = document.createElement("button");
+                removeButton.type = "button";
+                removeButton.textContent = "Remove";
+                removeButton.addEventListener("click", () => {
+                    row.remove();
+                    updateHiddenInputs();
+                });
+                row.appendChild(removeButton);
+
+                builder.appendChild(row);
+                updateHiddenInputs();
+            }
+
+            if (selectedRollups.length) {
+                selectedRollups.forEach((rollup) => addRow((rollup || "").split("_")));
+            } else {
+                addRow([]);
+            }
+
+            addRowButton.addEventListener("click", () => addRow([]));
+        })();
+    </script>
+{% endif %}
 {% endblock %}
