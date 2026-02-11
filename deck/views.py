@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 PROJECT_TEMPLATES = {}
 PRODUCT_DESCRIPTION_SCOPE_KEY = "product_description_scope_workbook"
 PRODUCT_DESCRIPTION_ROLLUPS_KEY = "product_description_rollups"
+PRODUCT_DESCRIPTION_ROLLUP_ALIASES_KEY = "product_description_rollup_aliases"
 
 
 def _product_list_columns_from_sheet(workbook_bytes: bytes, sheet_name: str) -> list[str]:
@@ -36,6 +37,17 @@ def _normalized_rollups(rollups: list[str]) -> list[str]:
     return normalized
 
 
+def _rollup_alias_map(rollups: list[str], aliases: list[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for rollup, alias in zip(rollups, aliases):
+        key = (rollup or "").strip()
+        if not key:
+            continue
+        value = (alias or "").strip()
+        result[key] = value or key
+    return result
+
+
 def home(request):
     return redirect("file-uploads")
 
@@ -45,7 +57,9 @@ def product_description(request):
         "sheet_names": [],
         "product_list_columns": [],
         "selected_rollups": request.session.get(PRODUCT_DESCRIPTION_ROLLUPS_KEY, []),
+        "selected_rollup_aliases": request.session.get(PRODUCT_DESCRIPTION_ROLLUP_ALIASES_KEY, {}),
         "selected_sheet": "",
+        "selected_rollup_pairs": [],
     }
 
     stored_scope = request.session.get(PRODUCT_DESCRIPTION_SCOPE_KEY)
@@ -53,10 +67,18 @@ def product_description(request):
     if stored_scope:
         scope_bytes = base64.b64decode(stored_scope)
 
+    selected_rollups = context["selected_rollups"]
+    selected_rollup_aliases = context["selected_rollup_aliases"]
+    context["selected_rollup_pairs"] = [
+        {"value": rollup, "alias": selected_rollup_aliases.get(rollup, rollup)}
+        for rollup in selected_rollups
+    ]
+
     if request.method == "POST":
         uploaded_scope = request.FILES.get("scope_workbook")
         selected_sheet = (request.POST.get("product_list_sheet") or "").strip()
         submitted_rollups = _normalized_rollups(request.POST.getlist("rollups"))
+        submitted_aliases = request.POST.getlist("rollup_aliases")
 
         if uploaded_scope:
             scope_bytes = uploaded_scope.read()
@@ -95,10 +117,17 @@ def product_description(request):
         context["product_list_columns"] = columns
 
         if submitted_rollups:
+            alias_map = _rollup_alias_map(submitted_rollups, submitted_aliases)
             request.session[PRODUCT_DESCRIPTION_ROLLUPS_KEY] = submitted_rollups
+            request.session[PRODUCT_DESCRIPTION_ROLLUP_ALIASES_KEY] = alias_map
             request.session.modified = True
             context["selected_rollups"] = submitted_rollups
+            context["selected_rollup_aliases"] = alias_map
             context["message"] = "Roll up selection saved for this session."
+            context["selected_rollup_pairs"] = [
+                {"value": rollup, "alias": alias_map.get(rollup, rollup)}
+                for rollup in submitted_rollups
+            ]
 
     return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
 

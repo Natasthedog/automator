@@ -54,11 +54,11 @@
 
                 <div id="rollup-values" style="margin-top:1rem;"></div>
 
-                {% if selected_rollups %}
+                {% if selected_rollup_pairs %}
                     <p class="helper-text" style="margin-top:1rem;">Saved roll ups:</p>
                     <ul>
-                        {% for rollup in selected_rollups %}
-                            <li>{{ rollup }}</li>
+                        {% for pair in selected_rollup_pairs %}
+                            <li>{{ pair.value }} → {{ pair.alias }}</li>
                         {% endfor %}
                     </ul>
                 {% endif %}
@@ -74,10 +74,12 @@
 {% if product_list_columns %}
     {{ product_list_columns|json_script:"product-list-columns" }}
     {{ selected_rollups|json_script:"selected-rollups" }}
+    {{ selected_rollup_aliases|json_script:"selected-rollup-aliases" }}
     <script>
         (function () {
             const columns = JSON.parse(document.getElementById("product-list-columns").textContent);
             const selectedRollups = JSON.parse(document.getElementById("selected-rollups").textContent || "[]");
+            const selectedRollupAliases = JSON.parse(document.getElementById("selected-rollup-aliases").textContent || "{}");
             const builder = document.getElementById("rollup-builder");
             const addRowButton = document.getElementById("add-rollup-row");
             const rollupValues = document.getElementById("rollup-values");
@@ -111,9 +113,12 @@
                         return;
                     }
                     const rollup = parts.join("_");
+                    const aliasInput = row.querySelector("input[data-alias-input]");
+                    const aliasValue = (aliasInput ? aliasInput.value : "").trim() || rollup;
+
                     const chip = document.createElement("p");
                     chip.className = "helper-text";
-                    chip.textContent = `Will save: ${rollup}`;
+                    chip.textContent = `Will save: ${rollup} as ${aliasValue}`;
                     rollupValues.appendChild(chip);
 
                     const input = document.createElement("input");
@@ -121,14 +126,20 @@
                     input.name = "rollups";
                     input.value = rollup;
                     rollupValues.appendChild(input);
+
+                    const aliasHidden = document.createElement("input");
+                    aliasHidden.type = "hidden";
+                    aliasHidden.name = "rollup_aliases";
+                    aliasHidden.value = aliasValue;
+                    rollupValues.appendChild(aliasHidden);
                 });
             }
 
-            function addRow(initialParts) {
+            function addRow(initialParts, initialAlias) {
                 const row = document.createElement("div");
                 row.setAttribute("data-rollup-row", "1");
                 row.style.display = "grid";
-                row.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr)) auto";
+                row.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr)) minmax(0, 1fr) auto";
                 row.style.gap = "0.5rem";
                 row.style.marginTop = "0.5rem";
 
@@ -137,6 +148,14 @@
                     select.addEventListener("change", updateHiddenInputs);
                     row.appendChild(select);
                 }
+
+                const aliasInput = document.createElement("input");
+                aliasInput.type = "text";
+                aliasInput.placeholder = "Rename roll up";
+                aliasInput.setAttribute("data-alias-input", "1");
+                aliasInput.value = initialAlias || "";
+                aliasInput.addEventListener("input", updateHiddenInputs);
+                row.appendChild(aliasInput);
 
                 const removeButton = document.createElement("button");
                 removeButton.type = "button";
@@ -152,12 +171,12 @@
             }
 
             if (selectedRollups.length) {
-                selectedRollups.forEach((rollup) => addRow((rollup || "").split("_")));
+                selectedRollups.forEach((rollup) => addRow((rollup || "").split("_"), selectedRollupAliases[rollup] || rollup));
             } else {
-                addRow([]);
+                addRow([], "");
             }
 
-            addRowButton.addEventListener("click", () => addRow([]));
+            addRowButton.addEventListener("click", () => addRow([], ""));
         })();
     </script>
 {% endif %}

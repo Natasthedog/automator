@@ -61,6 +61,7 @@ class ProductDescriptionViewTests(TestCase):
             data={
                 "product_list_sheet": "Product List",
                 "rollups": ["Manufacturer_Brand", "Brand_Subbrand"],
+                "rollup_aliases": ["Manu_Brand", "Brand_Sub"],
             },
         )
 
@@ -70,3 +71,6 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "repeat(3, minmax(0, 1fr))")
         self.assertContains(response, "Manufacturer_Brand")
         self.assertContains(response, "Brand_Subbrand")
+        self.assertContains(response, "Rename roll up")
+        self.assertContains(response, "Manu_Brand")
+        self.assertContains(response, "Brand_Sub")
