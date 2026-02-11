@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
+from django.conf import settings
 from django.http import Http404, HttpResponse
 from django.shortcuts import render
 from pptx import Presentation
@@ -36,11 +37,12 @@ def _shape_matches_marker(shape, marker_text: str) -> bool:
     return False
 
 
-def _find_template_chart(template_pptx):
-    if template_pptx is None:
+def _find_template_chart(template_source):
+    if template_source is None:
         return None
-    template_pptx.seek(0)
-    prs = Presentation(template_pptx)
+    if hasattr(template_source, "seek"):
+        template_source.seek(0)
+    prs = Presentation(template_source)
     for slide in prs.slides:
         if not any(_shape_matches_marker(shape, WATERFALL_TEMPLATE_MARKER) for shape in slide.shapes):
             continue
@@ -61,13 +63,10 @@ def deck_automation(request):
     if request.method == "POST":
         gathered_file = request.FILES.get("gathered_cn10")
         scope_file = request.FILES.get("scope_workbook")
-        selected_template = request.POST.get("template_choice", "").strip()
+        selected_template = request.POST.get("template_choice", "").strip() or "MMx"
         context["selected_template"] = selected_template
 
-        template_filename = TEMPLATE_OPTIONS.get(selected_template)
-        if not template_filename:
-            context["error"] = "Please select a deck template to continue."
-            return render(request, "deck_automation/deck_automation.html", context)
+        template_filename = TEMPLATE_OPTIONS.get(selected_template, "MMx.pptx")
 
         if not gathered_file:
             context["error"] = "Please upload the gatheredCN10 file to continue."
@@ -80,8 +79,7 @@ def deck_automation(request):
 
             gathered_df = read_df(gathered_file)
             scope_df = read_scope_df(scope_file)
-            with template_path.open("rb") as template_file:
-                template_chart = _find_template_chart(template_file)
+            template_chart = _find_template_chart(str(template_path))
             payloads_by_label = compute_waterfall_payloads_for_all_labels(
                 gathered_df,
                 scope_df,
@@ -105,6 +103,14 @@ def deck_automation(request):
                         "checksum": payload_checksum(payload),
                     }
                 )
+
+
+            if settings.DEBUG:
+                first_label = next(iter(payloads_by_label), None)
+                first_payload_categories = payloads_by_label[first_label].categories[:5] if first_label else []
+                context["debug_gathered_header_row_index"] = gathered_df.attrs.get("detected_header_row_index")
+                context["debug_gathered_columns"] = list(gathered_df.columns)
+                context["debug_first_payload_categories"] = first_payload_categories
 
             context.update(
                 {
