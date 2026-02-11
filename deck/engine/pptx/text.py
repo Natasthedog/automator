@@ -28,7 +28,11 @@ from lxml import etree
 
 logger = logging.getLogger(__name__)
 
-from .charts import _chart_title_text_frame
+def _chart_title_text_frame(chart):
+    from .charts import _chart_title_text_frame as _inner
+
+    return _inner(chart)
+
 from .slides import _find_slide_by_marker, _shape_text_snippet, _slide_index, _slide_title, _slides_with_placeholder
 
 def set_text_by_name(slide, shape_name, text):

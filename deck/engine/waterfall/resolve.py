@@ -29,7 +29,11 @@ from lxml import etree
 logger = logging.getLogger(__name__)
 
 from ..pptx.slides import _slide_title
-from .targets import _normalize_column_name
+
+
+
+def _normalize_column_name(value: str) -> str:
+    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
 
 def _normalize_text_value(value) -> str:
     if pd.isna(value):
