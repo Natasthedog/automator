@@ -2,21 +2,26 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 
 import pandas as pd
 
-from deck.engine.waterfall.compute import (
-    _payload_checksum,
-    _waterfall_base_indices,
-    _waterfall_base_values,
-    _waterfall_series_from_gathered_df,
-    compute_payload_for_label,
-)
-from deck.engine.waterfall.inject import _normalize_target_level_labels
-from deck.engine.waterfall.targets import _target_level_labels_from_gathered_df_with_filters
-
 logger = logging.getLogger(__name__)
+
+REQUIRED_COLUMNS = {
+    "Target Level Label",
+    "Target Label",
+    "Year",
+    "Actuals",
+    "Vars",
+    "Base",
+    "Promo",
+    "Media",
+    "Blanks",
+    "Positives",
+    "Negatives",
+}
+WATERFALL_SERIES_COLUMNS = ["Base", "Promo", "Media", "Blanks", "Positives", "Negatives"]
 
 
 @dataclass
@@ -28,58 +33,97 @@ class WaterfallPayload:
     gathered_label_values: dict[str, list]
 
 
-def _wrap_payload(payload) -> WaterfallPayload:
-    return WaterfallPayload(
-        categories=list(getattr(payload, "categories", []) or []),
-        series_values=[
-            (name, list(values)) for name, values in getattr(payload, "series_values", [])
-        ],
-        base_indices=getattr(payload, "base_indices", None),
-        base_values=getattr(payload, "base_values", None),
-        gathered_label_values={
-            key: list(values)
-            for key, values in getattr(payload, "gathered_label_values", {}).items()
-        },
-    )
+def _payload_checksum(series_values: list[tuple[str, list[float]]]) -> float:
+    checksum = 0.0
+    for _, values in series_values:
+        for value in values:
+            if value is None or pd.isna(value):
+                continue
+            checksum += abs(float(value))
+    return checksum
 
 
-def _payload_from_gathered_only(
-    gathered_df: pd.DataFrame,
-    scope_df: pd.DataFrame | None,
-    target_level_label: str,
-    bucket_data: dict | None,
-) -> WaterfallPayload:
-    gathered_override = _waterfall_series_from_gathered_df(
-        gathered_df,
-        scope_df,
-        target_level_label,
-    )
-    if gathered_override is None:
+def payload_checksum(payload: WaterfallPayload) -> float:
+    return _payload_checksum(payload.series_values)
+
+
+def _normalize_target_level_labels(labels: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for label in labels or []:
+        if label is None:
+            continue
+        value = str(label).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _to_float(value) -> float:
+    if value is None or pd.isna(value):
+        return 0.0
+    return float(value)
+
+
+def _require_columns(gathered_df: pd.DataFrame) -> None:
+    missing = sorted(REQUIRED_COLUMNS.difference(set(gathered_df.columns)))
+    if missing:
         raise ValueError(
-            f"No gatheredCN10 waterfall data found for Target Level Label {target_level_label!r}."
+            "Missing required gatheredCN10 column(s): " + ", ".join(missing)
         )
-    categories, series_dict, gathered_label_values = gathered_override
-    series_values: list[tuple[str, list[float]]] = []
-    for key in ["Base", "Promo", "Media", "Blanks", "Positives", "Negatives"]:
-        if key in series_dict:
-            series_values.append((key, list(series_dict[key])))
-    base_indices = _waterfall_base_indices(categories)
-    base_values = None
-    try:
-        base_values = _waterfall_base_values(
-            gathered_df,
-            target_level_label,
-            year1=bucket_data.get("year1") if bucket_data else None,
-            year2=bucket_data.get("year2") if bucket_data else None,
-        )
-    except Exception as exc:
-        logger.info(
-            "Skipping waterfall base values for %r: %s",
-            target_level_label,
-            exc,
-        )
+
+
+def _target_level_labels_from_gathered_df_with_filters(gathered_df: pd.DataFrame) -> list[str]:
+    labels = []
+    seen = set()
+    for value in gathered_df["Target Level Label"].tolist():
+        normalized = str(value).strip() if value is not None else ""
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        labels.append(normalized)
+    return labels
+
+
+def _compute_payload_for_label(gathered_df: pd.DataFrame, label: str) -> WaterfallPayload:
+    filtered = gathered_df[
+        gathered_df["Target Level Label"].astype(str).str.strip() == str(label).strip()
+    ].copy()
+    if filtered.empty:
+        raise ValueError(f"No gatheredCN10 data found for Target Level Label {label!r}.")
+
+    grouped = (
+        filtered.groupby("Year", sort=False)[["Actuals", *WATERFALL_SERIES_COLUMNS]]
+        .sum(numeric_only=True)
+        .reset_index()
+    )
+    categories = [str(value) for value in grouped["Year"].tolist()]
+    if not categories:
+        raise ValueError(f"No Year/category rows found for Target Level Label {label!r}.")
+
+    series_values = [
+        (series_name, [_to_float(value) for value in grouped[series_name].tolist()])
+        for series_name in WATERFALL_SERIES_COLUMNS
+    ]
+
+    base_indices: tuple[int, int] | None = None
+    if len(categories) >= 2:
+        base_indices = (0, len(categories) - 1)
+
+    actuals_values = [_to_float(value) for value in grouped["Actuals"].tolist()]
+    base_values: tuple[float, float] | None = None
+    if len(actuals_values) >= 2:
+        base_values = (actuals_values[0], actuals_values[-1])
+
+    gathered_label_values = {
+        "Year": categories,
+        "Actuals": actuals_values,
+    }
+
     return WaterfallPayload(
-        categories=list(categories),
+        categories=categories,
         series_values=series_values,
         base_indices=base_indices,
         base_values=base_values,
@@ -94,46 +138,26 @@ def compute_waterfall_payloads_for_all_labels(
     template_chart=None,
     target_labels: list[str] | None = None,
 ) -> dict[str, WaterfallPayload]:
+    del scope_df, bucket_data, template_chart
+    _require_columns(gathered_df)
+
     labels = _normalize_target_level_labels(target_labels)
     if not labels:
-        labels = _target_level_labels_from_gathered_df_with_filters(
-            gathered_df,
-            year1=bucket_data.get("year1") if bucket_data else None,
-            year2=bucket_data.get("year2") if bucket_data else None,
-            target_labels=bucket_data.get("target_labels") if bucket_data else None,
-        )
+        labels = _target_level_labels_from_gathered_df_with_filters(gathered_df)
+
     payloads_by_label: dict[str, WaterfallPayload] = {}
     logger.info("Precomputing waterfall payloads for %d label(s).", len(labels))
     for label in labels:
-        if template_chart is None:
-            payload = _payload_from_gathered_only(
-                gathered_df,
-                scope_df,
-                label,
-                bucket_data,
-            )
-        else:
-            computed = compute_payload_for_label(
-                gathered_df,
-                scope_df,
-                label,
-                bucket_data,
-                template_chart,
-            )
-            payload = _wrap_payload(computed)
+        payload = _compute_payload_for_label(gathered_df, label)
         payloads_by_label[label] = payload
-        checksum = _payload_checksum(payload.series_values)
         logger.info(
             "Computed waterfall payload for %r: %d categories, checksum %.2f",
             label,
             len(payload.categories),
-            checksum,
+            payload_checksum(payload),
         )
+
     return payloads_by_label
-
-
-def payload_checksum(payload: WaterfallPayload) -> float:
-    return _payload_checksum(payload.series_values)
 
 
 def _json_safe(value):
