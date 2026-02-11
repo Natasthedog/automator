@@ -28,7 +28,6 @@ from lxml import etree
 
 logger = logging.getLogger(__name__)
 
-from ..waterfall.inject import _find_header_column, _resolve_waterfall_labs_column
 from ..waterfall.targets import _find_sheet_by_candidates, _normalize_column_name
 
 logger = logging.getLogger(__name__)
@@ -415,6 +414,7 @@ def _update_c15_label_range_cache(
 
 
 def _update_waterfall_chart_caches(chart, workbook, categories: list[str]) -> None:
+    from ..waterfall.inject import _find_header_column, _resolve_waterfall_labs_column
     chart_part = chart.part
     root = chart_part._element
     nsmap = _chart_namespace_map(root)
@@ -971,6 +971,7 @@ def _update_waterfall_chart_caches(chart, workbook, categories: list[str]) -> No
 
 
 def _update_chart_label_caches(chart, workbook) -> None:
+    from ..waterfall.inject import _find_header_column, _resolve_waterfall_labs_column
     root = chart.part._element
     nsmap = _chart_namespace_map(root)
     label_refs = root.findall(".//c:dLbls//c:tx//c:strRef", namespaces=nsmap)

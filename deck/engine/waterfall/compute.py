@@ -30,11 +30,24 @@ logger = logging.getLogger(__name__)
 
 from ..pptx.charts import _categories_from_chart
 from ..time_period import _replace_modelling_period_placeholders_in_categories
-from .inject import _normalize_target_level_labels
 from .resolve import _normalize_text_value, _resolve_column_from_candidates, _resolve_label_from_text
 from .targets import _find_column_by_candidates, _find_column_by_row_values, _target_level_labels_from_gathered_df_with_filters
 
 DISPLAY_LABEL = {"Own": "Own", "Cross": "Competitor"}
+
+def _normalize_target_level_labels(labels: list[str] | None) -> list[str]:
+    unique_labels = []
+    seen = set()
+    for label in labels or []:
+        if label is None:
+            continue
+        value = str(label).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique_labels.append(value)
+    return unique_labels
+
 
 
 def _build_category_waterfall_df(
@@ -695,6 +708,7 @@ def _build_waterfall_chart_data(
     return cd, categories, base_indices, base_values, series_values, gathered_label_values
 
 
+@dataclass
 class WaterfallPayload:
     categories: list[str]
     series_values: list[tuple[str, list[float]]]

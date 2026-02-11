@@ -28,7 +28,6 @@ from lxml import etree
 
 logger = logging.getLogger(__name__)
 
-from .chart_cache import _update_chart_label_caches
 
 def update_or_add_column_chart(slide, chart_name, categories, series_dict):
     """
@@ -56,6 +55,8 @@ def update_or_add_column_chart(slide, chart_name, categories, series_dict):
         # Replace data in existing chart (preserves template styling)
         chart_shape.chart.replace_data(cd)
         updated_wb = _load_chart_workbook(chart_shape.chart)
+        from .chart_cache import _update_chart_label_caches
+
         _update_chart_label_caches(chart_shape.chart, updated_wb)
         return chart_shape
     else:
@@ -65,6 +66,8 @@ def update_or_add_column_chart(slide, chart_name, categories, series_dict):
                 shape.chart.replace_data(cd)
                 shape.name = chart_name
                 updated_wb = _load_chart_workbook(shape.chart)
+                from .chart_cache import _update_chart_label_caches
+
                 _update_chart_label_caches(shape.chart, updated_wb)
                 return shape
         # Remove any stale shapes with the target name before adding a new chart
@@ -83,6 +86,8 @@ def update_or_add_column_chart(slide, chart_name, categories, series_dict):
         # Light touch formatting; rely on template/theme for styling
         chart.has_legend = True
         updated_wb = _load_chart_workbook(chart)
+        from .chart_cache import _update_chart_label_caches
+
         _update_chart_label_caches(chart, updated_wb)
         return chart
 
