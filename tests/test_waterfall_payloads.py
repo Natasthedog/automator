@@ -140,3 +140,33 @@ def test_bucket_config_computes_distinct_values_per_target_level_label():
     alpha_checksum = _payload_checksum(payloads["Alpha"].series_values)
     beta_checksum = _payload_checksum(payloads["Beta"].series_values)
     assert alpha_checksum != beta_checksum
+
+
+def test_explicit_bucket_values_are_fallback_when_config_cannot_be_resolved():
+    gathered_df = pd.DataFrame(
+        [
+            {"Target Level Label": "Alpha", "Target Label": "Own", "Year": "Year1", "Actuals": 100},
+            {"Target Level Label": "Alpha", "Target Label": "Own", "Year": "Year2", "Actuals": 130},
+        ]
+    )
+    template_chart = _build_template_chart()
+
+    payloads = compute_waterfall_payloads_for_all_labels(
+        gathered_df,
+        scope_df=None,
+        bucket_data={
+            "year1": "Year1",
+            "year2": "Year2",
+            "labels": ["Own Price"],
+            "values": [7.0],
+            "bucket_config": {
+                "Price": {
+                    "target_labels": ["Own"],
+                    "subheaders_included": ["Price"],
+                }
+            },
+        },
+        template_chart=template_chart,
+    )
+
+    assert "Own Price" in payloads["Alpha"].categories
