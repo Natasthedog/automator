@@ -22,6 +22,19 @@ REQUIRED_COLUMNS = {
     "Negatives",
 }
 WATERFALL_SERIES_COLUMNS = ["Base", "Promo", "Media", "Blanks", "Positives", "Negatives"]
+CANONICAL_COLUMN_ALIASES: dict[str, list[str]] = {
+    "Target Level Label": ["Target Level Label", "Target Level"],
+    "Target Label": ["Target Label", "Target", "Target Type"],
+    "Year": ["Year", "Model Year"],
+    "Actuals": ["Actuals", "Actual"],
+    "Vars": ["Vars", "Var", "Variable", "Variable Name", "Bucket", "Driver"],
+    "Base": ["Base"],
+    "Promo": ["Promo", "Promotion", "Promotions"],
+    "Media": ["Media"],
+    "Blanks": ["Blanks", "Blank"],
+    "Positives": ["Positives", "Positive", "Pos"],
+    "Negatives": ["Negatives", "Negative", "Neg"],
+}
 
 
 @dataclass
@@ -67,6 +80,50 @@ def _to_float(value) -> float:
     return float(value)
 
 
+def _normalize_lookup_value(value: object) -> str:
+    text = str(value or "").strip().casefold()
+    return "".join(ch for ch in text if ch.isalnum())
+
+
+def _find_canonical_column(value: object) -> str | None:
+    normalized = _normalize_lookup_value(value)
+    if not normalized:
+        return None
+    for canonical, aliases in CANONICAL_COLUMN_ALIASES.items():
+        if any(_normalize_lookup_value(alias) == normalized for alias in aliases):
+            return canonical
+    return None
+
+
+def _canonicalize_gathered_columns(gathered_df: pd.DataFrame) -> pd.DataFrame:
+    df = gathered_df.copy()
+    rename_map: dict[object, str] = {}
+    for column in df.columns:
+        canonical = _find_canonical_column(column)
+        if canonical and canonical not in rename_map.values():
+            rename_map[column] = canonical
+
+    # Some gatheredCN10 extracts include a duplicated header row as row 1.
+    drop_first_row = False
+    if len(df) > 0:
+        first_row = df.iloc[0]
+        header_like_matches = 0
+        for column, value in first_row.items():
+            canonical = _find_canonical_column(value)
+            if canonical:
+                header_like_matches += 1
+                if canonical not in rename_map.values():
+                    rename_map[column] = canonical
+        if header_like_matches >= 4:
+            drop_first_row = True
+
+    if rename_map:
+        df = df.rename(columns=rename_map)
+    if drop_first_row:
+        df = df.iloc[1:].reset_index(drop=True)
+    return df
+
+
 def _require_columns(gathered_df: pd.DataFrame) -> None:
     missing = sorted(REQUIRED_COLUMNS.difference(set(gathered_df.columns)))
     if missing:
@@ -94,9 +151,13 @@ def _compute_payload_for_label(gathered_df: pd.DataFrame, label: str) -> Waterfa
     if filtered.empty:
         raise ValueError(f"No gatheredCN10 data found for Target Level Label {label!r}.")
 
+    numeric_columns = ["Actuals", *WATERFALL_SERIES_COLUMNS]
+    for column in numeric_columns:
+        filtered[column] = pd.to_numeric(filtered[column], errors="coerce").fillna(0)
+
     grouped = (
-        filtered.groupby("Year", sort=False)[["Actuals", *WATERFALL_SERIES_COLUMNS]]
-        .sum(numeric_only=True)
+        filtered.groupby("Year", sort=False)[numeric_columns]
+        .sum()
         .reset_index()
     )
     categories = [str(value) for value in grouped["Year"].tolist()]
@@ -139,6 +200,7 @@ def compute_waterfall_payloads_for_all_labels(
     target_labels: list[str] | None = None,
 ) -> dict[str, WaterfallPayload]:
     del scope_df, bucket_data, template_chart
+    gathered_df = _canonicalize_gathered_columns(gathered_df)
     _require_columns(gathered_df)
 
     labels = _normalize_target_level_labels(target_labels)
