@@ -5,6 +5,10 @@ import json
 
 import pandas as pd
 from django.core.files.uploadedfile import SimpleUploadedFile
+from pptx import Presentation
+from pptx.chart.data import ChartData
+from pptx.enum.chart import XL_CHART_TYPE
+from pptx.util import Inches
 from django.test import TestCase
 from django.urls import reverse
 
@@ -84,6 +88,23 @@ class DeckAutomationViewsTests(TestCase):
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
+    def _template_chart(self):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        chart_data = ChartData()
+        chart_data.categories = ["Placeholder"]
+        for name in ["Base", "Promo", "Media", "Blanks", "Positives", "Negatives"]:
+            chart_data.add_series(name, (0,))
+        chart_shape = slide.shapes.add_chart(
+            XL_CHART_TYPE.COLUMN_STACKED,
+            Inches(1),
+            Inches(1),
+            Inches(6),
+            Inches(3),
+            chart_data,
+        )
+        return chart_shape.chart
+
     def test_read_df_handles_csv_and_xlsx(self):
         csv_df = read_df(self._csv_upload())
         xlsx_df = read_df(self._xlsx_upload())
@@ -97,43 +118,16 @@ class DeckAutomationViewsTests(TestCase):
         gathered_df = pd.DataFrame(
             [
                 {
-                    "Target Level": "Target Level",
-                    "Target": "Target",
-                    "Model Year": "Model Year",
-                    "Actual": "Actual",
-                    "Variable Name": "Variable Name",
-                    "Base": "Base",
-                    "Promotion": "Promotion",
-                    "Media": "Media",
-                    "Blank": "Blank",
-                    "Positive": "Positive",
-                    "Negative": "Negative",
+                    "Target Level Label": "Alpha",
+                    "Target Label": "Own",
+                    "Year": "Year1",
+                    "Actuals": 100,
                 },
                 {
-                    "Target Level": "Alpha",
-                    "Target": "Own",
-                    "Model Year": "Year1",
-                    "Actual": 100,
-                    "Variable Name": "Var1",
-                    "Base": 10,
-                    "Promotion": 2,
-                    "Media": 3,
-                    "Blank": 4,
-                    "Positive": 5,
-                    "Negative": -6,
-                },
-                {
-                    "Target Level": "Alpha",
-                    "Target": "Own",
-                    "Model Year": "Year2",
-                    "Actual": 110,
-                    "Variable Name": "Var1",
-                    "Base": 11,
-                    "Promotion": 2,
-                    "Media": 3,
-                    "Blank": 4,
-                    "Positive": 5,
-                    "Negative": -6,
+                    "Target Level Label": "Alpha",
+                    "Target Label": "Own",
+                    "Year": "Year2",
+                    "Actuals": 110,
                 },
             ]
         )
@@ -142,12 +136,39 @@ class DeckAutomationViewsTests(TestCase):
             gathered_df,
             scope_df=None,
             bucket_data=None,
+            template_chart=self._template_chart(),
         )
 
         self.assertIn("Alpha", payloads)
         payload = payloads["Alpha"]
-        self.assertEqual(payload.categories, ["Year1", "Year2"])
+        self.assertEqual(payload.categories, ["Placeholder"])
         self.assertEqual(payload.base_values, (100.0, 110.0))
+
+    def test_read_df_detects_header_row_on_row_2_for_excel(self):
+        raw_df = pd.DataFrame(
+            [
+                ["ignore", "ignore", "ignore", "ignore"],
+                ["Target Level Label", "Target Label", "Year", "Actuals"],
+                ["Alpha", "Own", "Year1", 100],
+                ["Alpha", "Own", "Year2", 120],
+            ]
+        )
+        buffer = io.BytesIO()
+        raw_df.to_excel(buffer, index=False, header=False)
+        upload = SimpleUploadedFile(
+            "row2.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        gathered_df = read_df(upload)
+
+        self.assertEqual(gathered_df.attrs.get("detected_header_row_index"), 1)
+        self.assertEqual(
+            list(gathered_df.columns),
+            ["Target Level Label", "Target Label", "Year", "Actuals"],
+        )
+        self.assertEqual(gathered_df.iloc[0]["Target Level Label"], "Alpha")
 
     def test_deck_automation_page_loads(self):
         response = self.client.get(reverse("deck-automation"))
@@ -172,14 +193,14 @@ class DeckAutomationViewsTests(TestCase):
         self.assertContains(response, "Download payloads JSON")
 
 
-    def test_post_requires_template_choice(self):
+    def test_post_defaults_template_choice_to_mmx(self):
         response = self.client.post(
             reverse("deck-automation"),
             data={"gathered_cn10": self._csv_upload()},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Please select a deck template to continue.")
+        self.assertContains(response, "Computed")
 
     def test_download_endpoint_returns_json_payloads(self):
         post_response = self.client.post(

@@ -17,6 +17,16 @@
         <p class="helper-text">{{ message }}</p>
     {% endif %}
 
+
+    {% if debug_gathered_columns %}
+        <div class="summary">
+            <h2>Debug details</h2>
+            <p>detected gathered header row index: {{ debug_gathered_header_row_index }}</p>
+            <p>list(gathered_df.columns): {{ debug_gathered_columns }}</p>
+            <p>first 5 payload.categories for the first label: {{ debug_first_payload_categories }}</p>
+        </div>
+    {% endif %}
+
     {% if computed_count %}
         <div class="summary">
             <h2>Computed {{ computed_count }} label(s)</h2>

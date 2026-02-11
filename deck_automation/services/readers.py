@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+from csv import Sniffer
 from typing import IO
 
 import pandas as pd
@@ -9,7 +10,40 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
-SUPPORTED_EXTENSIONS = (".xls", ".xlsx", ".xlsb", ".csv")
+SUPPORTED_EXTENSIONS = (".xls", ".xlsx", ".xlsb", ".csv", ".tsv")
+TARGET_LEVEL_LABEL_COLUMN = "Target Level Label"
+
+
+def _find_header_row_index(df: pd.DataFrame, marker: str = TARGET_LEVEL_LABEL_COLUMN) -> int:
+    marker_normalized = marker.strip().casefold()
+    for row_idx in range(len(df.index)):
+        row_values = df.iloc[row_idx].tolist()
+        for value in row_values:
+            if str(value or "").strip().casefold() == marker_normalized:
+                return row_idx
+    return 0
+
+
+def _apply_detected_header_row(df: pd.DataFrame) -> pd.DataFrame:
+    header_row_index = _find_header_row_index(df)
+    if len(df.index) == 0:
+        out = df.copy()
+        out.attrs["detected_header_row_index"] = 0
+        return out
+    header_values = df.iloc[header_row_index].tolist()
+    data_df = df.iloc[header_row_index + 1 :].copy()
+    data_df.columns = header_values
+    out = data_df.reset_index(drop=True)
+    out.attrs["detected_header_row_index"] = int(header_row_index)
+    return out
+
+
+def _sniff_delimiter(text: str) -> str:
+    sample = text[:2048]
+    try:
+        return Sniffer().sniff(sample, delimiters=",\t;|").delimiter
+    except Exception:
+        return "\t" if "\t" in sample else ","
 
 
 def _read_bytes(uploaded_file: IO[bytes]) -> bytes:
@@ -28,17 +62,20 @@ def read_df(uploaded_file: IO[bytes]) -> pd.DataFrame:
         raise ValueError("Unsupported file format. Please upload CSV or Excel.")
 
     data = _read_bytes(uploaded_file)
-    if lower_name.endswith(".csv"):
+    if lower_name.endswith((".csv", ".tsv")):
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
             text = data.decode("latin-1")
-        return pd.read_csv(io.StringIO(text))
+        delimiter = _sniff_delimiter(text)
+        raw_df = pd.read_csv(io.StringIO(text), delimiter=delimiter, header=None)
+        return _apply_detected_header_row(raw_df)
 
     read_options: dict[str, object] = {}
     if lower_name.endswith(".xlsb"):
         read_options["engine"] = "pyxlsb"
-    return pd.read_excel(io.BytesIO(data), **read_options)
+    raw_df = pd.read_excel(io.BytesIO(data), header=None, **read_options)
+    return _apply_detected_header_row(raw_df)
 
 
 def read_scope_df(uploaded_file: IO[bytes]) -> pd.DataFrame | None:

@@ -52,3 +52,48 @@ def test_payloads_differ_across_labels():
         assert payload.categories
         assert payload.series_values
         assert all(values for _, values in payload.series_values)
+
+
+def test_payloads_use_template_categories_without_gathered_vars_columns():
+    gathered_df = pd.DataFrame(
+        [
+            {"Target Level Label": "Alpha", "Target Label": "Own", "Year": "Year1", "Actuals": 100},
+            {"Target Level Label": "Alpha", "Target Label": "Own", "Year": "Year2", "Actuals": 130},
+            {"Target Level Label": "Beta", "Target Label": "Own", "Year": "Year1", "Actuals": 90},
+            {"Target Level Label": "Beta", "Target Label": "Own", "Year": "Year2", "Actuals": 120},
+        ]
+    )
+    template_chart = _build_template_chart()
+
+    payloads = compute_waterfall_payloads_for_all_labels(
+        gathered_df,
+        scope_df=None,
+        bucket_data=None,
+        template_chart=template_chart,
+    )
+
+    assert payloads["Alpha"].categories == ["Placeholder"]
+    assert payloads["Alpha"].base_values == (100.0, 130.0)
+    assert payloads["Beta"].base_values == (90.0, 120.0)
+
+
+def test_payload_checksums_differ_for_multiple_target_level_labels_without_series_columns():
+    gathered_df = pd.DataFrame(
+        [
+            {"Target Level Label": "Alpha", "Target Label": "Own", "Year": "Year1", "Actuals": 100},
+            {"Target Level Label": "Alpha", "Target Label": "Own", "Year": "Year2", "Actuals": 130},
+            {"Target Level Label": "Beta", "Target Label": "Own", "Year": "Year1", "Actuals": 300},
+            {"Target Level Label": "Beta", "Target Label": "Own", "Year": "Year2", "Actuals": 360},
+        ]
+    )
+    template_chart = _build_template_chart()
+
+    payloads = compute_waterfall_payloads_for_all_labels(
+        gathered_df,
+        scope_df=None,
+        bucket_data=None,
+        template_chart=template_chart,
+    )
+
+    checksums = {label: _payload_checksum(payload.series_values) for label, payload in payloads.items()}
+    assert checksums["Alpha"] != checksums["Beta"]
