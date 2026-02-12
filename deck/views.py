@@ -50,6 +50,10 @@ def _sheet_df_from_workbook(workbook_bytes: bytes, sheet_name: str) -> pd.DataFr
     return pd.read_excel(io.BytesIO(workbook_bytes), sheet_name=sheet_name, dtype=object)
 
 
+def _underscore_joined_text(value: object) -> str:
+    return re.sub(r"\s+", "_", str(value or "").strip())
+
+
 def _first_non_empty_by_group(group: pd.Series):
     for value in group:
         if pd.notna(value) and str(value).strip():
@@ -137,7 +141,7 @@ def _compose_rollup_series(df: pd.DataFrame, component_columns: list[str]) -> pd
         for column in component_columns:
             value = row.get(column)
             if pd.notna(value) and str(value).strip():
-                values.append(str(value).strip())
+                values.append(_underscore_joined_text(value))
         return "_".join(values) if values else None
 
     return df[component_columns].apply(_compose_row, axis=1)
@@ -203,7 +207,7 @@ def _rollups_from_submitted_parts(request) -> tuple[list[str], list[str], dict[s
         selected = [value for value in parts if value]
         if not selected:
             continue
-        rollup = "_".join(selected)
+        rollup = "_".join(_underscore_joined_text(value) for value in selected)
         alias = (aliases[index] if index < len(aliases) else "").strip() or rollup
         rollups.append(rollup)
         rollup_aliases.append(alias)

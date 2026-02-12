@@ -176,7 +176,7 @@
                     if (!parts.length) {
                         return;
                     }
-                    const rollup = parts.join("_");
+                    const rollup = parts.map((part) => String(part || "").trim().replace(/\s+/g, "_")).join("_");
                     const aliasInput = row.querySelector("input[data-alias-input]");
                     const aliasValue = (aliasInput ? aliasInput.value : "").trim() || rollup;
 
