@@ -78,13 +78,33 @@
                 </select>
                 <p class="helper-text">Used to map PPG rows to Product List (defaults to EAN).</p>
             </div>
+            <div>
+                <label for="ppg_id_column">PPG_ID column</label>
+                <select id="ppg_id_column" name="ppg_id_column">
+                    <option value="">-- Try auto (PPG_ID) --</option>
+                    {% for column in ppg_sheet_columns %}
+                        <option value="{{ column }}" {% if selected_ppg_id_column == column %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">Used as the first key column in PRODUCT_DESCRIPTION.</p>
+            </div>
+            <div>
+                <label for="ppg_name_column">PPG_NAME column</label>
+                <select id="ppg_name_column" name="ppg_name_column">
+                    <option value="">-- Try auto (PPG_NAME) --</option>
+                    {% for column in ppg_sheet_columns %}
+                        <option value="{{ column }}" {% if selected_ppg_name_column == column %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">Used as the second key column in PRODUCT_DESCRIPTION.</p>
+            </div>
         {% endif %}
         {% if product_list_columns %}
             <div>
                 <label>Build roll ups</label>
                 <p class="helper-text">
-                    Use at least two dropdowns per row (up to three). Example: Manufacturer + Brand creates
-                    <strong>Manufacturer_Brand</strong>.
+                    Choose one Product List column per row. Each selected column becomes one roll-up
+                    column in PRODUCT_DESCRIPTION.
                 </p>
 
                 <div id="rollup-builder"></div>
@@ -145,13 +165,11 @@
                 rollupValues.innerHTML = "";
                 const rows = builder.querySelectorAll("[data-rollup-row]");
                 rows.forEach((row) => {
-                    const parts = Array.from(row.querySelectorAll("select"))
-                        .map((select) => select.value)
-                        .filter(Boolean);
-                    if (parts.length < 2) {
+                    const selectedValue = (row.querySelector("select") || {}).value || "";
+                    if (!selectedValue) {
                         return;
                     }
-                    const rollup = parts.join("_");
+                    const rollup = selectedValue;
                     const aliasInput = row.querySelector("input[data-alias-input]");
                     const aliasValue = (aliasInput ? aliasInput.value : "").trim() || rollup;
 
@@ -178,15 +196,13 @@
                 const row = document.createElement("div");
                 row.setAttribute("data-rollup-row", "1");
                 row.style.display = "grid";
-                row.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr)) minmax(0, 1fr) auto";
+                row.style.gridTemplateColumns = "minmax(0, 1fr) minmax(0, 1fr) auto";
                 row.style.gap = "0.5rem";
                 row.style.marginTop = "0.5rem";
 
-                for (let i = 0; i < 3; i += 1) {
-                    const select = buildSelect(initialParts && initialParts[i] ? initialParts[i] : "");
-                    select.addEventListener("change", updateHiddenInputs);
-                    row.appendChild(select);
-                }
+                const select = buildSelect(initialParts && initialParts[0] ? initialParts[0] : "");
+                select.addEventListener("change", updateHiddenInputs);
+                row.appendChild(select);
 
                 const aliasInput = document.createElement("input");
                 aliasInput.type = "text";
@@ -210,7 +226,7 @@
             }
 
             if (selectedRollups.length) {
-                selectedRollups.forEach((rollup) => addRow((rollup || "").split("_"), selectedRollupAliases[rollup] || rollup));
+                selectedRollups.forEach((rollup) => addRow([rollup || ""], selectedRollupAliases[rollup] || rollup));
             } else {
                 addRow([], "");
             }
