@@ -137,6 +137,43 @@ class ProductDescriptionViewTests(TestCase):
             response["Content-Disposition"],
         )
 
+
+    def test_generate_scope_handles_overlapping_column_names_between_sheets(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "CVA", "Brand"],
+                            ["111", "Product CVA", "Brand A"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN", "CVA"],
+                            ["P1", "PPG One", "111", "PPG CVA"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollups": ["CVA"],
+                "rollup_aliases": ["CVA"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
     def test_generate_scope_warns_when_ppg_id_or_name_missing_and_not_selected(self):
         self.client.post(
             reverse("product-description"),

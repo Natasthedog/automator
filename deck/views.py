@@ -66,8 +66,9 @@ def _build_product_description_df(
     correspondence_mapping_column: str,
     product_list_mapping_column: str,
 ) -> tuple[pd.DataFrame, int]:
-    left = correspondence_df.copy()
     right = product_list_df.copy()
+    correspondence_columns = [ppg_id_column, ppg_name_column, correspondence_mapping_column]
+    left = correspondence_df.loc[:, list(dict.fromkeys(correspondence_columns))].copy()
 
     left["__mapping_key"] = left[correspondence_mapping_column].map(_normalized_text)
     right["__mapping_key"] = right[product_list_mapping_column].map(_normalized_text)
@@ -80,12 +81,9 @@ def _build_product_description_df(
     )
 
     matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
-    if product_columns:
-        match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum())
-    else:
-        match_count = 0
+    match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
 
-    selected_rollups = [rollup for rollup in rollups if rollup in df_ProductDescription.columns]
+    selected_rollups = [rollup for rollup in rollups if rollup in product_columns]
     grouped = (
         df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups]
         .agg(_first_non_empty_by_group)
