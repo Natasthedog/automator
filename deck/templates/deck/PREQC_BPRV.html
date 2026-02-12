@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}PreQC BPRV{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>PreQC BPRV</h1>
+    <p>Upload the scope workbook and the BPRV workbook to evaluate Sales and BPRV relationship quality before the next stage.</p>
+
+    {% if error %}
+        <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+        {% csrf_token %}
+        <div>
+            <label for="scope_workbook">Scope workbook</label>
+            <input id="scope_workbook" type="file" name="scope_workbook" accept=".xlsx,.xls,.xlsb" required>
+            <p class="helper-text">Uses the PRODUCT_DESCRIPTION sheet to map Brand to PPG.</p>
+        </div>
+        <div>
+            <label for="bprv_workbook">BPRV workbook</label>
+            <input id="bprv_workbook" type="file" name="bprv_workbook" accept=".xlsx,.xls,.xlsb" required>
+        </div>
+        <div>
+            <button type="submit">Analyze correlation</button>
+        </div>
+    </form>
+
+    {% if top_results %}
+        <hr style="margin:1.5rem 0;border:none;border-top:1px solid #e5e7eb;">
+        <p>{{ correlation_intro }}</p>
+
+        <h2>Top 20 Geography, PPG, Brand combinations by Sales ↔ BPRV correlation</h2>
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse: collapse; margin-top:0.75rem;">
+                <thead>
+                    <tr style="background:#f3f4f6;">
+                        <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">Geography</th>
+                        <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">PPG</th>
+                        <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">Brand</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Correlation</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Total Sales</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Rows</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in top_results %}
+                        <tr>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.Geography }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.PPG }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.Brand }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.correlation }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.total_sales|floatformat:0 }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.n_rows }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <h3 style="margin-top:1.25rem;">Visualization</h3>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:0.5rem;">
+            {% for row in top_results %}
+                <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.5rem;">
+                    <p style="margin:0;font-size:0.85rem;">{{ row.Geography }} · {{ row.PPG }} · {{ row.Brand }}</p>
+                    <div style="height:10px; background:#dbeafe; border-radius:99px; margin-top:0.4rem;">
+                        <div style="height:10px; width:{% widthratio row.correlation 1 100 %}%; background:#2563eb; border-radius:99px;"></div>
+                    </div>
+                    <p style="margin:0.4rem 0 0 0; font-size:0.8rem; color:#1e3a8a;">r = {{ row.correlation }}</p>
+                </div>
+            {% endfor %}
+        </div>
+
+        <form method="get" style="margin-top:1rem;">
+            <input type="hidden" name="action" value="download_report">
+            <button type="submit">Download full report</button>
+        </form>
+    {% endif %}
+</div>
+{% endblock %}
