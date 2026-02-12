@@ -71,22 +71,28 @@ def _build_product_description_df(
 
     left["__mapping_key"] = left[correspondence_mapping_column].map(_normalized_text)
     right["__mapping_key"] = right[product_list_mapping_column].map(_normalized_text)
-    right_rollup_columns = [rollup for rollup in rollups if rollup in right.columns]
+    product_columns = [column for column in right.columns if column != "__mapping_key"]
 
-    merged = left.merge(
-        right[["__mapping_key", *right_rollup_columns]],
+    df_ProductDescription = left.merge(
+        right[["__mapping_key", *product_columns]],
         on="__mapping_key",
         how="left",
     )
-    match_count = int((merged["__mapping_key"] != "").sum() - merged[right_rollup_columns].isna().all(axis=1).sum()) if right_rollup_columns else 0
 
+    matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
+    if product_columns:
+        match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum())
+    else:
+        match_count = 0
+
+    selected_rollups = [rollup for rollup in rollups if rollup in df_ProductDescription.columns]
     grouped = (
-        merged.groupby([ppg_id_column, ppg_name_column], dropna=False)[right_rollup_columns]
+        df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups]
         .agg(_first_non_empty_by_group)
         .reset_index()
     )
 
-    rename_map = {rollup: alias_map.get(rollup, rollup) for rollup in right_rollup_columns}
+    rename_map = {rollup: alias_map.get(rollup, rollup) for rollup in selected_rollups}
     grouped = grouped.rename(columns=rename_map)
     return grouped, match_count
 
@@ -147,6 +153,8 @@ def product_description(request):
         "selected_ppg_sheet": "",
         "selected_product_list_mapping_column": "",
         "selected_ppg_mapping_column": "",
+        "selected_ppg_id_column": "",
+        "selected_ppg_name_column": "",
         "selected_rollup_pairs": [],
     }
 
@@ -172,6 +180,8 @@ def product_description(request):
             request.POST.get("product_list_mapping_column") or ""
         ).strip()
         selected_ppg_mapping_column = (request.POST.get("ppg_mapping_column") or "").strip()
+        selected_ppg_id_column = (request.POST.get("ppg_id_column") or "").strip()
+        selected_ppg_name_column = (request.POST.get("ppg_name_column") or "").strip()
         action = (request.POST.get("action") or "").strip().lower()
 
         if uploaded_scope:
@@ -242,6 +252,8 @@ def product_description(request):
 
         context["selected_product_list_mapping_column"] = selected_product_list_mapping_column
         context["selected_ppg_mapping_column"] = selected_ppg_mapping_column
+        context["selected_ppg_id_column"] = selected_ppg_id_column
+        context["selected_ppg_name_column"] = selected_ppg_name_column
 
         if action == "generate_scope":
             saved_rollups = _normalized_rollups(request.session.get(PRODUCT_DESCRIPTION_ROLLUPS_KEY, []))
@@ -253,10 +265,13 @@ def product_description(request):
             product_df = _sheet_df_from_workbook(scope_bytes, selected_sheet)
             correspondence_df = _sheet_df_from_workbook(scope_bytes, selected_ppg_sheet)
 
-            ppg_id_column = _find_column_name(list(correspondence_df.columns), "PPG_ID")
-            ppg_name_column = _find_column_name(list(correspondence_df.columns), "PPG_NAME")
+            ppg_id_column = selected_ppg_id_column or _find_column_name(list(correspondence_df.columns), "PPG_ID")
+            ppg_name_column = selected_ppg_name_column or _find_column_name(list(correspondence_df.columns), "PPG_NAME")
             if not ppg_id_column or not ppg_name_column:
-                context["error"] = "Could not find PPG_ID and/or PPG_NAME columns in the selected PPG sheet."
+                context["warning"] = (
+                    "Could not find PPG_ID and/or PPG_NAME columns in the selected PPG sheet. "
+                    "Please identify those columns before generating PRODUCT_DESCRIPTION."
+                )
                 return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
 
             auto_ppg_mapping_column = _find_column_name(list(correspondence_df.columns), "EAN")
