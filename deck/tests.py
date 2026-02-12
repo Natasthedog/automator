@@ -5,7 +5,7 @@ import io
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 
 class ProductDescriptionViewTests(TestCase):
@@ -60,7 +60,7 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "Please choose the correct sheet from the list")
         self.assertContains(response, "LookupSheet")
 
-    def test_product_description_renders_three_rollup_dropdowns_and_saves_rollup(self):
+    def test_product_description_renders_multi_column_rollup_builder_and_saves_rollup(self):
         self.client.post(
             reverse("product-description"),
             data={
@@ -77,8 +77,9 @@ class ProductDescriptionViewTests(TestCase):
             reverse("product-description"),
             data={
                 "product_list_sheet": "Product List",
-                "rollups": ["Manufacturer_Brand", "Brand_Subbrand"],
-                "rollup_aliases": ["Manu_Brand", "Brand_Sub"],
+                "ppg_correspondence_sheet": "PRODUCT DESCRIPTION",
+                "rollups": ["Manufacturer", "Brand"],
+                "rollup_aliases": ["MFR", "BRAND"],
             },
         )
 
@@ -86,13 +87,45 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "Build roll ups")
         self.assertContains(response, "Add another roll up")
         self.assertContains(response, "repeat(3, minmax(0, 1fr))")
-        self.assertContains(response, "Manufacturer_Brand")
-        self.assertContains(response, "Brand_Subbrand")
+        self.assertContains(response, "choose column 2")
+        self.assertContains(response, "choose column 3")
+        self.assertContains(response, "Manufacturer")
+        self.assertContains(response, "Brand")
         self.assertContains(response, "Rename roll up")
-        self.assertContains(response, "Manu_Brand")
-        self.assertContains(response, "Brand_Sub")
+        self.assertContains(response, "MFR")
+        self.assertContains(response, "BRAND")
+        self.assertContains(response, "Brand_Subbrand_Flavour")
+        self.assertContains(response, "PPG_ID column")
+        self.assertContains(response, "PPG_NAME column")
         self.assertContains(response, "PPG_EAN_CORRESPONDENCE sheet")
         self.assertContains(response, "Generate PRODUCT_DESCRIPTION & Download Scope")
+
+
+    def test_save_rollups_warns_when_no_rollup_values_detected(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload(
+                    {
+                        "Product List": ["EAN", "Brand", "Subbrand"],
+                        "PPG_EAN_CORRESPONDENCE": ["PPG_ID", "PPG_NAME", "EAN"],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "action": "save_rollups",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No roll ups were detected from your selections")
+
 
     def test_generate_scope_downloads_product_description_sheet(self):
         self.client.post(
@@ -101,8 +134,8 @@ class ProductDescriptionViewTests(TestCase):
                 "scope_workbook": self._scope_upload_with_rows(
                     {
                         "Product List": [
-                            ["EAN", "Manufacturer", "Brand", "Manufacturer_Brand"],
-                            ["111", "Mfr A", "Brand A", "Mfr A_Brand A"],
+                            ["EAN", "Manufacturer", "Brand", "PackType"],
+                            ["111", "Mfr A", "Brand A", "Bottle"],
                         ],
                         "PPG_EAN_CORRESPONDENCE": [
                             ["PPG_ID", "PPG_NAME", "EAN"],
@@ -118,8 +151,8 @@ class ProductDescriptionViewTests(TestCase):
             data={
                 "product_list_sheet": "Product List",
                 "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
-                "rollups": ["Manufacturer_Brand"],
-                "rollup_aliases": ["MANU_BRAND"],
+                "rollups": ["Manufacturer", "PackType"],
+                "rollup_aliases": ["MANUFACTURER", "PACK_TYPE"],
                 "action": "generate_scope",
             },
         )
@@ -133,3 +166,114 @@ class ProductDescriptionViewTests(TestCase):
             'attachment; filename="scope_with_product_description.xlsx"',
             response["Content-Disposition"],
         )
+
+
+
+    def test_generate_scope_builds_three_column_rollup_values(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "Brand", "Subbrand", "Flavour"],
+                            ["111", "BrandA", "SubA", "Lemon"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN"],
+                            ["P1", "PPG One", "111"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollups": ["Brand_Subbrand_Flavour"],
+                "rollup_aliases": ["ROL1"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        loaded = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = loaded["PRODUCT_DESCRIPTION"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        values = [cell.value for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
+
+        self.assertIn("ROL1", headers)
+        self.assertIn("BrandA_SubA_Lemon", values)
+
+
+    def test_generate_scope_handles_overlapping_column_names_between_sheets(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "CVA", "Brand"],
+                            ["111", "Product CVA", "Brand A"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN", "CVA"],
+                            ["P1", "PPG One", "111", "PPG CVA"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollups": ["CVA"],
+                "rollup_aliases": ["CVA"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def test_generate_scope_warns_when_ppg_id_or_name_missing_and_not_selected(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "Manufacturer"],
+                            ["111", "Mfr A"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["GROUP_ID", "GROUP_NAME", "EAN"],
+                            ["P1", "PPG One", "111"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollups": ["Manufacturer"],
+                "rollup_aliases": ["MANUFACTURER"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Please identify those columns before generating PRODUCT_DESCRIPTION")
