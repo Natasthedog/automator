@@ -83,6 +83,18 @@ def _build_product_description_df(
     matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
     match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
 
+    selected_rollups: list[str] = []
+    for rollup in rollups:
+        component_columns = _rollup_component_columns(rollup, product_columns)
+        if not component_columns:
+            continue
+        if len(component_columns) > 1:
+            df_ProductDescription[rollup] = _compose_rollup_series(df_ProductDescription, component_columns)
+        selected_rollups.append(rollup)
+
+    matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
+    match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
+
     selected_rollups = [rollup for rollup in rollups if rollup in product_columns]
     grouped = (
         df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups]
@@ -93,6 +105,29 @@ def _build_product_description_df(
     rename_map = {rollup: alias_map.get(rollup, rollup) for rollup in selected_rollups}
     grouped = grouped.rename(columns=rename_map)
     return grouped, match_count
+
+
+def _rollup_component_columns(rollup: str, product_columns: list[str]) -> list[str]:
+    if rollup in product_columns:
+        return [rollup]
+    parts = [part.strip() for part in (rollup or "").split("_") if part.strip()]
+    if len(parts) < 2 or len(parts) > 3:
+        return []
+    if all(part in product_columns for part in parts):
+        return parts
+    return []
+
+
+def _compose_rollup_series(df: pd.DataFrame, component_columns: list[str]) -> pd.Series:
+    def _compose_row(row: pd.Series):
+        values: list[str] = []
+        for column in component_columns:
+            value = row.get(column)
+            if pd.notna(value) and str(value).strip():
+                values.append(str(value).strip())
+        return "_".join(values) if values else None
+
+    return df[component_columns].apply(_compose_row, axis=1)
 
 
 def _updated_scope_workbook_bytes(

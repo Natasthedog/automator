@@ -5,7 +5,7 @@ import io
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 
 class ProductDescriptionViewTests(TestCase):
@@ -60,7 +60,7 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "Please choose the correct sheet from the list")
         self.assertContains(response, "LookupSheet")
 
-    def test_product_description_renders_single_rollup_dropdown_and_saves_rollup(self):
+    def test_product_description_renders_multi_column_rollup_builder_and_saves_rollup(self):
         self.client.post(
             reverse("product-description"),
             data={
@@ -86,12 +86,13 @@ class ProductDescriptionViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Build roll ups")
         self.assertContains(response, "Add another roll up")
-        self.assertContains(response, "minmax(0, 1fr) minmax(0, 1fr) auto")
+        self.assertContains(response, "repeat(3, minmax(0, 1fr))")
         self.assertContains(response, "Manufacturer")
         self.assertContains(response, "Brand")
         self.assertContains(response, "Rename roll up")
         self.assertContains(response, "MFR")
         self.assertContains(response, "BRAND")
+        self.assertContains(response, "Brand_Subbrand_Flavour")
         self.assertContains(response, "PPG_ID column")
         self.assertContains(response, "PPG_NAME column")
         self.assertContains(response, "PPG_EAN_CORRESPONDENCE sheet")
@@ -136,6 +137,47 @@ class ProductDescriptionViewTests(TestCase):
             'attachment; filename="scope_with_product_description.xlsx"',
             response["Content-Disposition"],
         )
+
+
+
+    def test_generate_scope_builds_three_column_rollup_values(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "Brand", "Subbrand", "Flavour"],
+                            ["111", "BrandA", "SubA", "Lemon"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN"],
+                            ["P1", "PPG One", "111"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollups": ["Brand_Subbrand_Flavour"],
+                "rollup_aliases": ["ROL1"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        loaded = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = loaded["PRODUCT_DESCRIPTION"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        values = [cell.value for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
+
+        self.assertIn("ROL1", headers)
+        self.assertIn("BrandA_SubA_Lemon", values)
 
 
     def test_generate_scope_handles_overlapping_column_names_between_sheets(self):

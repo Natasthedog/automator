@@ -103,8 +103,8 @@
             <div>
                 <label>Build roll ups</label>
                 <p class="helper-text">
-                    Choose one Product List column per row. Each selected column becomes one roll-up
-                    column in PRODUCT_DESCRIPTION.
+                    Choose up to three Product List columns per row. Selected columns are merged with
+                    underscores (for example: Brand_Subbrand_Flavour).
                 </p>
 
                 <div id="rollup-builder"></div>
@@ -165,8 +165,10 @@
                 rollupValues.innerHTML = "";
                 const rows = builder.querySelectorAll("[data-rollup-row]");
                 rows.forEach((row) => {
-                    const selectedValue = (row.querySelector("select") || {}).value || "";
-                    if (!selectedValue) {
+                    const parts = Array.from(row.querySelectorAll("select"))
+                        .map((select) => select.value)
+                        .filter(Boolean);
+                    if (!parts.length) {
                         return;
                     }
                     const rollup = selectedValue;
