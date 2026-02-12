@@ -174,7 +174,7 @@
                     if (!parts.length) {
                         return;
                     }
-                    const rollup = selectedValue;
+                    const rollup = parts.join("_");
                     const aliasInput = row.querySelector("input[data-alias-input]");
                     const aliasValue = (aliasInput ? aliasInput.value : "").trim() || rollup;
 
@@ -234,7 +234,10 @@
             }
 
             if (selectedRollups.length) {
-                selectedRollups.forEach((rollup) => addRow([rollup || ""], selectedRollupAliases[rollup] || rollup));
+                selectedRollups.forEach((rollup) => {
+                    const parts = String(rollup || "").split("_").slice(0, 3);
+                    addRow(parts, selectedRollupAliases[rollup] || rollup);
+                });
             } else {
                 addRow([], "");
             }
