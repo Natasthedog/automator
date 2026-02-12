@@ -127,6 +127,38 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "No roll ups were detected from your selections")
 
 
+
+    def test_save_rollups_accepts_rollup_parts_payload(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload(
+                    {
+                        "Product List": ["EAN", "Brand", "Subbrand", "Flavour"],
+                        "PPG_EAN_CORRESPONDENCE": ["PPG_ID", "PPG_NAME", "EAN"],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollup_part_1": ["Brand"],
+                "rollup_part_2": ["Subbrand"],
+                "rollup_part_3": ["Flavour"],
+                "rollup_alias": ["ROL_1"],
+                "action": "save_rollups",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Roll up selection saved for this session")
+        self.assertContains(response, "Brand_Subbrand_Flavour")
+
+
     def test_generate_scope_downloads_product_description_sheet(self):
         self.client.post(
             reverse("product-description"),

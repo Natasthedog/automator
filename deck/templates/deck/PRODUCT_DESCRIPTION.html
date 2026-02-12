@@ -160,6 +160,7 @@
                     select.appendChild(option);
                 });
                 select.setAttribute("aria-label", `Roll-up column ${index + 1}`);
+                select.name = `rollup_part_${index + 1}`;
                 return select;
             }
 
@@ -212,6 +213,7 @@
 
                 const aliasInput = document.createElement("input");
                 aliasInput.type = "text";
+                aliasInput.name = "rollup_alias";
                 aliasInput.placeholder = "Rename roll up";
                 aliasInput.setAttribute("data-alias-input", "1");
                 aliasInput.value = initialAlias || "";

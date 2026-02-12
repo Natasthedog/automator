@@ -107,6 +107,18 @@ def _build_product_description_df(
     matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
     match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
 
+    selected_rollups: list[str] = []
+    for rollup in rollups:
+        component_columns = _rollup_component_columns(rollup, product_columns)
+        if not component_columns:
+            continue
+        if len(component_columns) > 1:
+            df_ProductDescription[rollup] = _compose_rollup_series(df_ProductDescription, component_columns)
+        selected_rollups.append(rollup)
+
+    matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
+    match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
+
     selected_rollups = [rollup for rollup in rollups if rollup in product_columns]
     grouped = (
         df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups]
@@ -183,6 +195,31 @@ def _rollup_alias_map(rollups: list[str], aliases: list[str]) -> dict[str, str]:
     return result
 
 
+def _rollups_from_submitted_parts(request) -> tuple[list[str], list[str]]:
+    part_one = request.POST.getlist("rollup_part_1")
+    part_two = request.POST.getlist("rollup_part_2")
+    part_three = request.POST.getlist("rollup_part_3")
+    aliases = request.POST.getlist("rollup_alias")
+
+    max_rows = max(len(part_one), len(part_two), len(part_three), len(aliases), 0)
+    rollups: list[str] = []
+    rollup_aliases: list[str] = []
+    for index in range(max_rows):
+        parts = [
+            (part_one[index] if index < len(part_one) else "").strip(),
+            (part_two[index] if index < len(part_two) else "").strip(),
+            (part_three[index] if index < len(part_three) else "").strip(),
+        ]
+        selected = [value for value in parts if value]
+        if not selected:
+            continue
+        rollup = "_".join(selected)
+        alias = (aliases[index] if index < len(aliases) else "").strip() or rollup
+        rollups.append(rollup)
+        rollup_aliases.append(alias)
+    return _normalized_rollups(rollups), rollup_aliases
+
+
 def home(request):
     return redirect("file-uploads")
 
@@ -221,6 +258,8 @@ def product_description(request):
         selected_ppg_sheet = (request.POST.get("ppg_correspondence_sheet") or "").strip()
         submitted_rollups = _normalized_rollups(request.POST.getlist("rollups"))
         submitted_aliases = request.POST.getlist("rollup_aliases")
+        if not submitted_rollups:
+            submitted_rollups, submitted_aliases = _rollups_from_submitted_parts(request)
         selected_product_list_mapping_column = (
             request.POST.get("product_list_mapping_column") or ""
         ).strip()
