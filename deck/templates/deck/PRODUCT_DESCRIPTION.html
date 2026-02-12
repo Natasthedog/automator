@@ -134,11 +134,13 @@
     {{ product_list_columns|json_script:"product-list-columns" }}
     {{ selected_rollups|json_script:"selected-rollups" }}
     {{ selected_rollup_aliases|json_script:"selected-rollup-aliases" }}
+    {{ selected_rollup_parts|json_script:"selected-rollup-parts" }}
     <script>
         (function () {
             const columns = JSON.parse(document.getElementById("product-list-columns").textContent);
             const selectedRollups = JSON.parse(document.getElementById("selected-rollups").textContent || "[]");
             const selectedRollupAliases = JSON.parse(document.getElementById("selected-rollup-aliases").textContent || "{}");
+            const selectedRollupParts = JSON.parse(document.getElementById("selected-rollup-parts").textContent || "{}");
             const builder = document.getElementById("rollup-builder");
             const addRowButton = document.getElementById("add-rollup-row");
             const rollupValues = document.getElementById("rollup-values");
@@ -235,7 +237,9 @@
 
             if (selectedRollups.length) {
                 selectedRollups.forEach((rollup) => {
-                    const parts = String(rollup || "").split("_").slice(0, 3);
+                    const parts = Array.isArray(selectedRollupParts[rollup])
+                        ? selectedRollupParts[rollup].slice(0, 3)
+                        : String(rollup || "").split("_").slice(0, 3);
                     addRow(parts, selectedRollupAliases[rollup] || rollup);
                 });
             } else {
