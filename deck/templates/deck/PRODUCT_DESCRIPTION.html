@@ -78,13 +78,33 @@
                 </select>
                 <p class="helper-text">Used to map PPG rows to Product List (defaults to EAN).</p>
             </div>
+            <div>
+                <label for="ppg_id_column">PPG_ID column</label>
+                <select id="ppg_id_column" name="ppg_id_column">
+                    <option value="">-- Try auto (PPG_ID) --</option>
+                    {% for column in ppg_sheet_columns %}
+                        <option value="{{ column }}" {% if selected_ppg_id_column == column %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">Used as the first key column in PRODUCT_DESCRIPTION.</p>
+            </div>
+            <div>
+                <label for="ppg_name_column">PPG_NAME column</label>
+                <select id="ppg_name_column" name="ppg_name_column">
+                    <option value="">-- Try auto (PPG_NAME) --</option>
+                    {% for column in ppg_sheet_columns %}
+                        <option value="{{ column }}" {% if selected_ppg_name_column == column %}selected{% endif %}>{{ column }}</option>
+                    {% endfor %}
+                </select>
+                <p class="helper-text">Used as the second key column in PRODUCT_DESCRIPTION.</p>
+            </div>
         {% endif %}
         {% if product_list_columns %}
             <div>
                 <label>Build roll ups</label>
                 <p class="helper-text">
-                    Use at least two dropdowns per row (up to three). Example: Manufacturer + Brand creates
-                    <strong>Manufacturer_Brand</strong>.
+                    Choose up to three Product List columns per row. Selected columns are merged with
+                    underscores (for example: Brand_Subbrand_Flavour).
                 </p>
 
                 <div id="rollup-builder"></div>
@@ -122,12 +142,13 @@
             const builder = document.getElementById("rollup-builder");
             const addRowButton = document.getElementById("add-rollup-row");
             const rollupValues = document.getElementById("rollup-values");
+            const form = document.getElementById("product-description-form");
 
-            function buildSelect(selectedValue) {
+            function buildSelect(selectedValue, index) {
                 const select = document.createElement("select");
                 const blank = document.createElement("option");
                 blank.value = "";
-                blank.textContent = "-- choose --";
+                blank.textContent = `-- choose column ${index + 1} --`;
                 select.appendChild(blank);
                 columns.forEach((column) => {
                     const option = document.createElement("option");
@@ -138,6 +159,8 @@
                     }
                     select.appendChild(option);
                 });
+                select.setAttribute("aria-label", `Roll-up column ${index + 1}`);
+                select.name = `rollup_part_${index + 1}`;
                 return select;
             }
 
@@ -148,7 +171,7 @@
                     const parts = Array.from(row.querySelectorAll("select"))
                         .map((select) => select.value)
                         .filter(Boolean);
-                    if (parts.length < 2) {
+                    if (!parts.length) {
                         return;
                     }
                     const rollup = parts.join("_");
@@ -183,13 +206,14 @@
                 row.style.marginTop = "0.5rem";
 
                 for (let i = 0; i < 3; i += 1) {
-                    const select = buildSelect(initialParts && initialParts[i] ? initialParts[i] : "");
+                    const select = buildSelect(initialParts && initialParts[i] ? initialParts[i] : "", i);
                     select.addEventListener("change", updateHiddenInputs);
                     row.appendChild(select);
                 }
 
                 const aliasInput = document.createElement("input");
                 aliasInput.type = "text";
+                aliasInput.name = "rollup_alias";
                 aliasInput.placeholder = "Rename roll up";
                 aliasInput.setAttribute("data-alias-input", "1");
                 aliasInput.value = initialAlias || "";
@@ -216,6 +240,9 @@
             }
 
             addRowButton.addEventListener("click", () => addRow([], ""));
+            form.addEventListener("submit", () => {
+                updateHiddenInputs();
+            });
         })();
     </script>
 {% endif %}

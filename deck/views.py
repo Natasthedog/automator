@@ -66,29 +66,64 @@ def _build_product_description_df(
     correspondence_mapping_column: str,
     product_list_mapping_column: str,
 ) -> tuple[pd.DataFrame, int]:
-    left = correspondence_df.copy()
     right = product_list_df.copy()
+    correspondence_columns = [ppg_id_column, ppg_name_column, correspondence_mapping_column]
+    left = correspondence_df.loc[:, list(dict.fromkeys(correspondence_columns))].copy()
 
     left["__mapping_key"] = left[correspondence_mapping_column].map(_normalized_text)
     right["__mapping_key"] = right[product_list_mapping_column].map(_normalized_text)
-    right_rollup_columns = [rollup for rollup in rollups if rollup in right.columns]
+    product_columns = [column for column in right.columns if column != "__mapping_key"]
 
-    merged = left.merge(
-        right[["__mapping_key", *right_rollup_columns]],
+    df_ProductDescription = left.merge(
+        right[["__mapping_key", *product_columns]],
         on="__mapping_key",
         how="left",
     )
-    match_count = int((merged["__mapping_key"] != "").sum() - merged[right_rollup_columns].isna().all(axis=1).sum()) if right_rollup_columns else 0
+
+    matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
+    match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
+
+    selected_rollups: list[str] = []
+    for rollup in rollups:
+        component_columns = _rollup_component_columns(rollup, product_columns)
+        if not component_columns:
+            continue
+        if len(component_columns) > 1:
+            df_ProductDescription[rollup] = _compose_rollup_series(df_ProductDescription, component_columns)
+        selected_rollups.append(rollup)
 
     grouped = (
-        merged.groupby([ppg_id_column, ppg_name_column], dropna=False)[right_rollup_columns]
+        df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups]
         .agg(_first_non_empty_by_group)
         .reset_index()
     )
 
-    rename_map = {rollup: alias_map.get(rollup, rollup) for rollup in right_rollup_columns}
+    rename_map = {rollup: alias_map.get(rollup, rollup) for rollup in selected_rollups}
     grouped = grouped.rename(columns=rename_map)
     return grouped, match_count
+
+
+def _rollup_component_columns(rollup: str, product_columns: list[str]) -> list[str]:
+    if rollup in product_columns:
+        return [rollup]
+    parts = [part.strip() for part in (rollup or "").split("_") if part.strip()]
+    if len(parts) < 2 or len(parts) > 3:
+        return []
+    if all(part in product_columns for part in parts):
+        return parts
+    return []
+
+
+def _compose_rollup_series(df: pd.DataFrame, component_columns: list[str]) -> pd.Series:
+    def _compose_row(row: pd.Series):
+        values: list[str] = []
+        for column in component_columns:
+            value = row.get(column)
+            if pd.notna(value) and str(value).strip():
+                values.append(str(value).strip())
+        return "_".join(values) if values else None
+
+    return df[component_columns].apply(_compose_row, axis=1)
 
 
 def _updated_scope_workbook_bytes(
@@ -132,6 +167,31 @@ def _rollup_alias_map(rollups: list[str], aliases: list[str]) -> dict[str, str]:
     return result
 
 
+def _rollups_from_submitted_parts(request) -> tuple[list[str], list[str]]:
+    part_one = request.POST.getlist("rollup_part_1")
+    part_two = request.POST.getlist("rollup_part_2")
+    part_three = request.POST.getlist("rollup_part_3")
+    aliases = request.POST.getlist("rollup_alias")
+
+    max_rows = max(len(part_one), len(part_two), len(part_three), len(aliases), 0)
+    rollups: list[str] = []
+    rollup_aliases: list[str] = []
+    for index in range(max_rows):
+        parts = [
+            (part_one[index] if index < len(part_one) else "").strip(),
+            (part_two[index] if index < len(part_two) else "").strip(),
+            (part_three[index] if index < len(part_three) else "").strip(),
+        ]
+        selected = [value for value in parts if value]
+        if not selected:
+            continue
+        rollup = "_".join(selected)
+        alias = (aliases[index] if index < len(aliases) else "").strip() or rollup
+        rollups.append(rollup)
+        rollup_aliases.append(alias)
+    return _normalized_rollups(rollups), rollup_aliases
+
+
 def home(request):
     return redirect("file-uploads")
 
@@ -147,6 +207,8 @@ def product_description(request):
         "selected_ppg_sheet": "",
         "selected_product_list_mapping_column": "",
         "selected_ppg_mapping_column": "",
+        "selected_ppg_id_column": "",
+        "selected_ppg_name_column": "",
         "selected_rollup_pairs": [],
     }
 
@@ -168,10 +230,14 @@ def product_description(request):
         selected_ppg_sheet = (request.POST.get("ppg_correspondence_sheet") or "").strip()
         submitted_rollups = _normalized_rollups(request.POST.getlist("rollups"))
         submitted_aliases = request.POST.getlist("rollup_aliases")
+        if not submitted_rollups:
+            submitted_rollups, submitted_aliases = _rollups_from_submitted_parts(request)
         selected_product_list_mapping_column = (
             request.POST.get("product_list_mapping_column") or ""
         ).strip()
         selected_ppg_mapping_column = (request.POST.get("ppg_mapping_column") or "").strip()
+        selected_ppg_id_column = (request.POST.get("ppg_id_column") or "").strip()
+        selected_ppg_name_column = (request.POST.get("ppg_name_column") or "").strip()
         action = (request.POST.get("action") or "").strip().lower()
 
         if uploaded_scope:
@@ -239,9 +305,16 @@ def product_description(request):
                 {"value": rollup, "alias": alias_map.get(rollup, rollup)}
                 for rollup in submitted_rollups
             ]
+        elif action == "save_rollups":
+            context["warning"] = (
+                "No roll ups were detected from your selections. "
+                "Choose 1 to 3 columns per row before saving."
+            )
 
         context["selected_product_list_mapping_column"] = selected_product_list_mapping_column
         context["selected_ppg_mapping_column"] = selected_ppg_mapping_column
+        context["selected_ppg_id_column"] = selected_ppg_id_column
+        context["selected_ppg_name_column"] = selected_ppg_name_column
 
         if action == "generate_scope":
             saved_rollups = _normalized_rollups(request.session.get(PRODUCT_DESCRIPTION_ROLLUPS_KEY, []))
@@ -253,10 +326,13 @@ def product_description(request):
             product_df = _sheet_df_from_workbook(scope_bytes, selected_sheet)
             correspondence_df = _sheet_df_from_workbook(scope_bytes, selected_ppg_sheet)
 
-            ppg_id_column = _find_column_name(list(correspondence_df.columns), "PPG_ID")
-            ppg_name_column = _find_column_name(list(correspondence_df.columns), "PPG_NAME")
+            ppg_id_column = selected_ppg_id_column or _find_column_name(list(correspondence_df.columns), "PPG_ID")
+            ppg_name_column = selected_ppg_name_column or _find_column_name(list(correspondence_df.columns), "PPG_NAME")
             if not ppg_id_column or not ppg_name_column:
-                context["error"] = "Could not find PPG_ID and/or PPG_NAME columns in the selected PPG sheet."
+                context["warning"] = (
+                    "Could not find PPG_ID and/or PPG_NAME columns in the selected PPG sheet. "
+                    "Please identify those columns before generating PRODUCT_DESCRIPTION."
+                )
                 return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
 
             auto_ppg_mapping_column = _find_column_name(list(correspondence_df.columns), "EAN")
