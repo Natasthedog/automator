@@ -493,6 +493,142 @@ def product_description(request):
     return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
 
 
+
+
+def _find_column_by_candidates(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    column_lookup = {_normalized_text(column): column for column in df.columns}
+    for candidate in candidates:
+        key = _normalized_text(candidate)
+        if key in column_lookup:
+            return column_lookup[key]
+    for candidate in candidates:
+        key = _normalized_text(candidate)
+        for normalized_column, original in column_lookup.items():
+            if key and (key in normalized_column or normalized_column in key):
+                return original
+    return None
+
+
+def _safe_group_correlation(group: pd.DataFrame, sales_col: str, bprv_col: str) -> float | None:
+    clean = group[[sales_col, bprv_col]].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(clean) < 3:
+        return None
+    if clean[sales_col].std() < 1e-6 or clean[bprv_col].std() < 1e-6:
+        return None
+    return float(clean[sales_col].corr(clean[bprv_col]))
+
+def preqc_bprv(request):
+    context: dict[str, object] = {"top_results": [], "correlation_intro": ""}
+
+    if request.method == "POST":
+        scope_workbook = request.FILES.get("scope_workbook")
+        bprv_workbook = request.FILES.get("bprv_workbook")
+
+        if not scope_workbook or not bprv_workbook:
+            context["error"] = "Please upload both the scope file and the BPRV file."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        try:
+            scope_product_df = pd.read_excel(scope_workbook, sheet_name="PRODUCT_DESCRIPTION", dtype=object)
+        except Exception:
+            context["error"] = "Could not read PRODUCT_DESCRIPTION from the scope file."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        try:
+            bprv_df = pd.read_excel(bprv_workbook, dtype=object)
+        except Exception:
+            context["error"] = "Could not read the BPRV workbook. Please verify the file format."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        scope_brand_col = _find_column_by_candidates(scope_product_df, ["Brand"])
+        scope_ppg_col = _find_column_by_candidates(scope_product_df, ["PPG", "PPG_NAME", "PPG Name"])
+        bprv_brand_col = _find_column_by_candidates(bprv_df, ["Brand"])
+        bprv_ppg_col = _find_column_by_candidates(bprv_df, ["PPG", "PPG_NAME", "PPG Name"])
+        geography_col = _find_column_by_candidates(bprv_df, ["Geography", "Area", "Region", "Market"])
+        sales_col = _find_column_by_candidates(bprv_df, ["Sales", "Value Sales", "Net Sales"])
+        bprv_value_col = _find_column_by_candidates(bprv_df, ["BPRV", "Bprv"])
+
+        required = [scope_brand_col, scope_ppg_col, bprv_brand_col, bprv_ppg_col, geography_col, sales_col, bprv_value_col]
+        if any(value is None for value in required):
+            context["error"] = (
+                "Could not detect required columns. Need Brand and PPG in scope PRODUCT_DESCRIPTION, "
+                "and Geography, Brand, PPG, Sales, BPRV in the BPRV file."
+            )
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        brand_ppg = (
+            scope_product_df[[scope_brand_col, scope_ppg_col]]
+            .dropna()
+            .rename(columns={scope_brand_col: "Brand", scope_ppg_col: "PPG"})
+        )
+        brand_ppg["__brand_key"] = brand_ppg["Brand"].map(_normalized_text)
+        brand_ppg = brand_ppg.drop_duplicates("__brand_key")
+
+        merged = bprv_df.rename(columns={
+            bprv_brand_col: "Brand",
+            bprv_ppg_col: "PPG",
+            geography_col: "Geography",
+            sales_col: "Sales",
+            bprv_value_col: "BPRV",
+        }).copy()
+        merged["__brand_key"] = merged["Brand"].map(_normalized_text)
+        merged = merged.drop(columns=["PPG"], errors="ignore").merge(
+            brand_ppg[["__brand_key", "PPG"]],
+            on="__brand_key",
+            how="left",
+        )
+        merged = merged.dropna(subset=["PPG"])
+
+        grouped = (
+            merged.groupby(["Geography", "PPG", "Brand"], dropna=False)
+            .apply(lambda g: pd.Series({
+                "correlation": _safe_group_correlation(g, "Sales", "BPRV"),
+                "total_sales": pd.to_numeric(g["Sales"], errors="coerce").sum(),
+                "n_rows": len(g),
+            }))
+            .reset_index()
+            .dropna(subset=["correlation"])
+            .sort_values(by=["correlation", "total_sales"], ascending=[False, False])
+        )
+
+        top_results = grouped.head(20).copy()
+        top_results["correlation"] = top_results["correlation"].round(3)
+
+        report_buffer = io.BytesIO()
+        with pd.ExcelWriter(report_buffer, engine="openpyxl") as writer:
+            grouped.to_excel(writer, index=False, sheet_name="PreQC_BPRV_Correlation")
+        report_bytes = report_buffer.getvalue()
+
+        if (request.POST.get("action") or "").strip().lower() == "download_report":
+            response = HttpResponse(
+                report_bytes,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            response["Content-Disposition"] = 'attachment; filename="preqc_bprv_full_report.xlsx"'
+            return response
+
+        context["top_results"] = top_results.to_dict("records")
+        context["correlation_intro"] = (
+            "Here we check the correlation between Sales and BPRV to identify combinations where "
+            "pricing/value movements align most strongly with sales trends."
+        )
+        context["report_ready"] = True
+        request.session["preqc_bprv_report"] = base64.b64encode(report_bytes).decode("ascii")
+        request.session.modified = True
+
+    elif request.method == "GET" and (request.GET.get("action") or "").lower() == "download_report":
+        encoded = request.session.get("preqc_bprv_report")
+        if encoded:
+            response = HttpResponse(
+                base64.b64decode(encoded),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            response["Content-Disposition"] = 'attachment; filename="preqc_bprv_full_report.xlsx"'
+            return response
+
+    return render(request, "deck/PREQC_BPRV.html", context)
+
+
 def generate_deck(
     n_clicks,
     data_contents,
