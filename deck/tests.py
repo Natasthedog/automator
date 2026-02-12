@@ -327,6 +327,53 @@ class ProductDescriptionViewTests(TestCase):
         self.assertIn("ROL_SPACE", headers)
         self.assertIn("Brand_A_Sub_A_Lemon_Lime", values)
 
+    def test_generate_scope_joins_multiple_rollup_values_for_same_ppg(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "Manufacturer", "Brand"],
+                            ["111", "Manuf2", "BrandT"],
+                            ["222", "Manuf2", "BrandZ"],
+                            ["333", "Manuf2", "BrandX"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN"],
+                            ["2", "NAME2", "111"],
+                            ["2", "NAME2", "222"],
+                            ["2", "NAME2", "333"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollups": ["Manufacturer", "Brand"],
+                "rollup_aliases": ["MANUFACTURER", "BRAND"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        loaded = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = loaded["PRODUCT_DESCRIPTION"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        values = [cell.value for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
+        value_map = dict(zip(headers, values))
+
+        self.assertEqual(value_map["PPG_ID"], "2")
+        self.assertEqual(value_map["PPG_NAME"], "NAME2")
+        self.assertEqual(value_map["MANUFACTURER"], "Manuf2")
+        self.assertEqual(value_map["BRAND"], "BrandT_BrandZ_BrandX")
+
+
     def test_generate_scope_handles_overlapping_column_names_between_sheets(self):
         self.client.post(
             reverse("product-description"),

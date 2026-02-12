@@ -55,11 +55,20 @@ def _underscore_joined_text(value: object) -> str:
     return re.sub(r"\s+", "_", str(value or "").strip())
 
 
-def _first_non_empty_by_group(group: pd.Series):
+def _joined_unique_values_by_group(group: pd.Series):
+    unique_values: list[str] = []
+    seen: set[str] = set()
     for value in group:
-        if pd.notna(value) and str(value).strip():
-            return value
-    return None
+        if pd.isna(value):
+            continue
+        normalized_value = _underscore_joined_text(value)
+        if not normalized_value or normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        unique_values.append(normalized_value)
+    if not unique_values:
+        return None
+    return "_".join(unique_values)
 
 
 def _build_product_description_df(
@@ -108,7 +117,7 @@ def _build_product_description_df(
 
     grouped = (
         df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups]
-        .agg(_first_non_empty_by_group)
+        .agg(_joined_unique_values_by_group)
         .reset_index()
     )
 
