@@ -241,6 +241,92 @@ class ProductDescriptionViewTests(TestCase):
         self.assertIn("BrandA_SubA_Lemon", values)
 
 
+
+
+    def test_generate_scope_builds_merged_rollup_when_source_columns_have_underscores(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "Brand_Owner", "Sub_Brand", "Flavour"],
+                            ["111", "OwnerA", "SubA", "Lemon"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN"],
+                            ["P1", "PPG One", "111"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollup_part_1": ["Brand_Owner"],
+                "rollup_part_2": ["Sub_Brand"],
+                "rollup_part_3": ["Flavour"],
+                "rollup_alias": ["ROL_US"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        loaded = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = loaded["PRODUCT_DESCRIPTION"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        values = [cell.value for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
+
+        self.assertIn("ROL_US", headers)
+        self.assertIn("OwnerA_SubA_Lemon", values)
+
+
+
+    def test_generate_scope_joins_merged_rollup_values_with_underscores_not_spaces(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "Brand Name", "Sub Brand", "Flavour Note"],
+                            ["111", "Brand A", "Sub A", "Lemon Lime"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN"],
+                            ["P1", "PPG One", "111"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollup_part_1": ["Brand Name"],
+                "rollup_part_2": ["Sub Brand"],
+                "rollup_part_3": ["Flavour Note"],
+                "rollup_alias": ["ROL_SPACE"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        loaded = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = loaded["PRODUCT_DESCRIPTION"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        values = [cell.value for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
+
+        self.assertIn("ROL_SPACE", headers)
+        self.assertIn("Brand_A_Sub_A_Lemon_Lime", values)
+
     def test_generate_scope_handles_overlapping_column_names_between_sheets(self):
         self.client.post(
             reverse("product-description"),
