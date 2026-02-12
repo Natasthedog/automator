@@ -134,11 +134,13 @@
     {{ product_list_columns|json_script:"product-list-columns" }}
     {{ selected_rollups|json_script:"selected-rollups" }}
     {{ selected_rollup_aliases|json_script:"selected-rollup-aliases" }}
+    {{ selected_rollup_parts|json_script:"selected-rollup-parts" }}
     <script>
         (function () {
             const columns = JSON.parse(document.getElementById("product-list-columns").textContent);
             const selectedRollups = JSON.parse(document.getElementById("selected-rollups").textContent || "[]");
             const selectedRollupAliases = JSON.parse(document.getElementById("selected-rollup-aliases").textContent || "{}");
+            const selectedRollupParts = JSON.parse(document.getElementById("selected-rollup-parts").textContent || "{}");
             const builder = document.getElementById("rollup-builder");
             const addRowButton = document.getElementById("add-rollup-row");
             const rollupValues = document.getElementById("rollup-values");
@@ -174,7 +176,7 @@
                     if (!parts.length) {
                         return;
                     }
-                    const rollup = selectedValue;
+                    const rollup = parts.join("_");
                     const aliasInput = row.querySelector("input[data-alias-input]");
                     const aliasValue = (aliasInput ? aliasInput.value : "").trim() || rollup;
 
@@ -234,7 +236,12 @@
             }
 
             if (selectedRollups.length) {
-                selectedRollups.forEach((rollup) => addRow([rollup || ""], selectedRollupAliases[rollup] || rollup));
+                selectedRollups.forEach((rollup) => {
+                    const parts = Array.isArray(selectedRollupParts[rollup])
+                        ? selectedRollupParts[rollup].slice(0, 3)
+                        : String(rollup || "").split("_").slice(0, 3);
+                    addRow(parts, selectedRollupAliases[rollup] || rollup);
+                });
             } else {
                 addRow([], "");
             }
