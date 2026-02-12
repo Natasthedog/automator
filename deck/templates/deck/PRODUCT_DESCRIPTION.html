@@ -104,7 +104,8 @@
                 <label>Build roll ups</label>
                 <p class="helper-text">
                     Choose up to three Product List columns per row. Selected columns are merged with
-                    underscores (for example: Brand_Subbrand_Flavour).
+                    underscores (for example: Brand_Subbrand_Flavour). Use the dropdowns to choose column 1,
+                    choose column 2, and choose column 3.
                 </p>
 
                 <div id="rollup-builder"></div>
@@ -116,7 +117,7 @@
                     <p class="helper-text" style="margin-top:1rem;">Saved roll ups:</p>
                     <ul>
                         {% for pair in selected_rollup_pairs %}
-                            <li>{{ pair.value }} → {{ pair.alias }}</li>
+                            <li>{{ pair.value }} → {{ pair.alias }}{% if pair.use_multi_label %} (multiple values => Multi {{ pair.alias|lower|title }}){% endif %}</li>
                         {% endfor %}
                     </ul>
                 {% endif %}
@@ -135,16 +136,27 @@
     {{ selected_rollups|json_script:"selected-rollups" }}
     {{ selected_rollup_aliases|json_script:"selected-rollup-aliases" }}
     {{ selected_rollup_parts|json_script:"selected-rollup-parts" }}
+    {{ selected_rollup_multi_labels|json_script:"selected-rollup-multi-labels" }}
     <script>
         (function () {
             const columns = JSON.parse(document.getElementById("product-list-columns").textContent);
             const selectedRollups = JSON.parse(document.getElementById("selected-rollups").textContent || "[]");
             const selectedRollupAliases = JSON.parse(document.getElementById("selected-rollup-aliases").textContent || "{}");
             const selectedRollupParts = JSON.parse(document.getElementById("selected-rollup-parts").textContent || "{}");
+            const selectedRollupMultiLabels = JSON.parse(document.getElementById("selected-rollup-multi-labels").textContent || "{}");
             const builder = document.getElementById("rollup-builder");
             const addRowButton = document.getElementById("add-rollup-row");
             const rollupValues = document.getElementById("rollup-values");
             const form = document.getElementById("product-description-form");
+
+            function toTitleCase(value) {
+                return String(value || "")
+                    .replace(/_/g, " ")
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+                    .join(" ");
+            }
 
             function buildSelect(selectedValue, index) {
                 const select = document.createElement("select");
@@ -176,13 +188,18 @@
                     if (!parts.length) {
                         return;
                     }
+
                     const rollup = parts.map((part) => String(part || "").trim().replace(/\s+/g, "_")).join("_");
                     const aliasInput = row.querySelector("input[data-alias-input]");
                     const aliasValue = (aliasInput ? aliasInput.value : "").trim() || rollup;
+                    const multiCheckbox = row.querySelector("input[data-multi-label-checkbox]");
+                    const useMultiLabel = !!(multiCheckbox && multiCheckbox.checked);
 
                     const chip = document.createElement("p");
                     chip.className = "helper-text";
-                    chip.textContent = `Will save: ${rollup} as ${aliasValue}`;
+                    chip.textContent = useMultiLabel
+                        ? `Will save: ${rollup} as ${aliasValue} (multiple values => Multi ${toTitleCase(aliasValue)})`
+                        : `Will save: ${rollup} as ${aliasValue}`;
                     rollupValues.appendChild(chip);
 
                     const input = document.createElement("input");
@@ -196,14 +213,20 @@
                     aliasHidden.name = "rollup_aliases";
                     aliasHidden.value = aliasValue;
                     rollupValues.appendChild(aliasHidden);
+
+                    const multiHidden = document.createElement("input");
+                    multiHidden.type = "hidden";
+                    multiHidden.name = "rollup_use_multi_label";
+                    multiHidden.value = useMultiLabel ? "1" : "0";
+                    rollupValues.appendChild(multiHidden);
                 });
             }
 
-            function addRow(initialParts, initialAlias) {
+            function addRow(initialParts, initialAlias, initialUseMultiLabel) {
                 const row = document.createElement("div");
                 row.setAttribute("data-rollup-row", "1");
                 row.style.display = "grid";
-                row.style.gridTemplateColumns = "minmax(0, 1fr) minmax(0, 1fr) auto";
+                row.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr)) minmax(0, 1fr) auto auto";
                 row.style.gap = "0.5rem";
                 row.style.marginTop = "0.5rem";
 
@@ -221,6 +244,24 @@
                 aliasInput.value = initialAlias || "";
                 aliasInput.addEventListener("input", updateHiddenInputs);
                 row.appendChild(aliasInput);
+
+                const multiLabelWrap = document.createElement("label");
+                multiLabelWrap.style.display = "flex";
+                multiLabelWrap.style.alignItems = "center";
+                multiLabelWrap.style.gap = "0.25rem";
+
+                const multiLabelCheckbox = document.createElement("input");
+                multiLabelCheckbox.type = "checkbox";
+                multiLabelCheckbox.setAttribute("data-multi-label-checkbox", "1");
+                multiLabelCheckbox.checked = initialUseMultiLabel !== false;
+                multiLabelCheckbox.addEventListener("change", updateHiddenInputs);
+
+                const multiLabelText = document.createElement("span");
+                multiLabelText.textContent = "Use Multi label";
+
+                multiLabelWrap.appendChild(multiLabelCheckbox);
+                multiLabelWrap.appendChild(multiLabelText);
+                row.appendChild(multiLabelWrap);
 
                 const removeButton = document.createElement("button");
                 removeButton.type = "button";
@@ -240,13 +281,17 @@
                     const parts = Array.isArray(selectedRollupParts[rollup])
                         ? selectedRollupParts[rollup].slice(0, 3)
                         : String(rollup || "").split("_").slice(0, 3);
-                    addRow(parts, selectedRollupAliases[rollup] || rollup);
+                    addRow(
+                        parts,
+                        selectedRollupAliases[rollup] || rollup,
+                        selectedRollupMultiLabels[rollup] !== false
+                    );
                 });
             } else {
-                addRow([], "");
+                addRow([], "", true);
             }
 
-            addRowButton.addEventListener("click", () => addRow([], ""));
+            addRowButton.addEventListener("click", () => addRow([], "", true));
             form.addEventListener("submit", () => {
                 updateHiddenInputs();
             });

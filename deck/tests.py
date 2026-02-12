@@ -92,6 +92,7 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "Manufacturer")
         self.assertContains(response, "Brand")
         self.assertContains(response, "Rename roll up")
+        self.assertContains(response, "Use Multi label")
         self.assertContains(response, "MFR")
         self.assertContains(response, "BRAND")
         self.assertContains(response, "Brand_Subbrand_Flavour")
@@ -357,6 +358,7 @@ class ProductDescriptionViewTests(TestCase):
                 "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
                 "rollups": ["Manufacturer", "Brand"],
                 "rollup_aliases": ["MANUFACTURER", "BRAND"],
+                "rollup_use_multi_label": ["0", "0"],
                 "action": "generate_scope",
             },
         )
@@ -372,6 +374,51 @@ class ProductDescriptionViewTests(TestCase):
         self.assertEqual(value_map["PPG_NAME"], "NAME2")
         self.assertEqual(value_map["MANUFACTURER"], "Manuf2")
         self.assertEqual(value_map["BRAND"], "BrandT_BrandZ_BrandX")
+
+
+    def test_generate_scope_can_output_multi_label_for_selected_rollup(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload_with_rows(
+                    {
+                        "Product List": [
+                            ["EAN", "Manufacturer", "Brand", "CVA"],
+                            ["111", "MANUF2", "BrandT", "3000g"],
+                            ["222", "MANUF4", "BrandZ", "5000g"],
+                        ],
+                        "PPG_EAN_CORRESPONDENCE": [
+                            ["PPG_ID", "PPG_NAME", "EAN"],
+                            ["2", "NAME2", "111"],
+                            ["2", "NAME2", "222"],
+                        ],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "rollups": ["Manufacturer", "Brand", "CVA"],
+                "rollup_aliases": ["MANUFACTURER", "BRAND", "CVA"],
+                "rollup_use_multi_label": ["0", "1", "0"],
+                "action": "generate_scope",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        loaded = load_workbook(io.BytesIO(response.content), data_only=True)
+        sheet = loaded["PRODUCT_DESCRIPTION"]
+        headers = [cell.value for cell in next(sheet.iter_rows(min_row=1, max_row=1))]
+        values = [cell.value for cell in next(sheet.iter_rows(min_row=2, max_row=2))]
+        value_map = dict(zip(headers, values))
+
+        self.assertEqual(value_map["MANUFACTURER"], "MANUF2_MANUF4")
+        self.assertEqual(value_map["BRAND"], "Multi Brand")
+        self.assertEqual(value_map["CVA"], "3000g_5000g")
 
 
     def test_generate_scope_handles_overlapping_column_names_between_sheets(self):
