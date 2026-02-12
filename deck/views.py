@@ -17,6 +17,7 @@ PRODUCT_DESCRIPTION_SCOPE_KEY = "product_description_scope_workbook"
 PRODUCT_DESCRIPTION_ROLLUPS_KEY = "product_description_rollups"
 PRODUCT_DESCRIPTION_ROLLUP_ALIASES_KEY = "product_description_rollup_aliases"
 PRODUCT_DESCRIPTION_ROLLUP_PARTS_KEY = "product_description_rollup_parts"
+PRODUCT_DESCRIPTION_ROLLUP_MULTI_LABEL_KEY = "product_description_rollup_multi_label"
 
 
 def _product_list_columns_from_sheet(workbook_bytes: bytes, sheet_name: str) -> list[str]:
@@ -55,11 +56,33 @@ def _underscore_joined_text(value: object) -> str:
     return re.sub(r"\s+", "_", str(value or "").strip())
 
 
-def _first_non_empty_by_group(group: pd.Series):
+def _joined_unique_values_by_group(group: pd.Series) -> list[str]:
+    unique_values: list[str] = []
+    seen: set[str] = set()
     for value in group:
-        if pd.notna(value) and str(value).strip():
-            return value
-    return None
+        if pd.isna(value):
+            continue
+        normalized_value = _underscore_joined_text(value)
+        if not normalized_value or normalized_value in seen:
+            continue
+        seen.add(normalized_value)
+        unique_values.append(normalized_value)
+    return unique_values
+
+
+def _multi_rollup_label(label: str) -> str:
+    cleaned = str(label or "").strip().replace("_", " ")
+    return f"Multi {cleaned.title() if cleaned else 'Value'}"
+
+
+def _is_multi_label_enabled(value: object, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "off", "no"}
+    return bool(value)
 
 
 def _build_product_description_df(
@@ -72,6 +95,7 @@ def _build_product_description_df(
     correspondence_mapping_column: str,
     product_list_mapping_column: str,
     rollup_parts_map: dict[str, list[str]] | None = None,
+    rollup_multi_label_map: dict[str, bool] | None = None,
 ) -> tuple[pd.DataFrame, int]:
     right = product_list_df.copy()
     correspondence_columns = [ppg_id_column, ppg_name_column, correspondence_mapping_column]
@@ -79,7 +103,9 @@ def _build_product_description_df(
 
     left["__mapping_key"] = left[correspondence_mapping_column].map(_normalized_text)
     right["__mapping_key"] = right[product_list_mapping_column].map(_normalized_text)
-    product_columns = [column for column in right.columns if column != "__mapping_key"]
+    product_columns = [
+        column for column in right.columns if column not in {"__mapping_key", product_list_mapping_column}
+    ]
 
     df_ProductDescription = left.merge(
         right[["__mapping_key", *product_columns]],
@@ -106,12 +132,22 @@ def _build_product_description_df(
     matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
     match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
 
-    grouped = (
-        df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups]
-        .agg(_first_non_empty_by_group)
-        .reset_index()
+    grouped = df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups].agg(
+        _joined_unique_values_by_group
     )
 
+    for rollup in selected_rollups:
+        use_multi_label = _is_multi_label_enabled((rollup_multi_label_map or {}).get(rollup), default=True)
+        alias_label = alias_map.get(rollup, rollup)
+        grouped[rollup] = grouped[rollup].map(
+            lambda values: (
+                _multi_rollup_label(alias_label)
+                if use_multi_label and len(values) > 1
+                else ("_".join(values) if values else None)
+            )
+        )
+
+    grouped = grouped.reset_index()
     rename_map = {rollup: alias_map.get(rollup, rollup) for rollup in selected_rollups}
     grouped = grouped.rename(columns=rename_map)
     return grouped, match_count
@@ -189,16 +225,42 @@ def _rollup_alias_map(rollups: list[str], aliases: list[str]) -> dict[str, str]:
     return result
 
 
-def _rollups_from_submitted_parts(request) -> tuple[list[str], list[str], dict[str, list[str]]]:
+def _expanded_multi_label_flags(multi_label_flags: list[str]) -> list[str]:
+    if len(multi_label_flags) != 1:
+        return multi_label_flags
+    raw = str(multi_label_flags[0] or "").strip()
+    if not raw:
+        return []
+    tokens = re.findall(r"0|1|true|false|off|on|no|yes", raw.lower())
+    if len(tokens) > 1:
+        return tokens
+    return multi_label_flags
+
+
+def _rollup_multi_label_map(rollups: list[str], multi_label_flags: list[str]) -> dict[str, bool]:
+    result: dict[str, bool] = {}
+    expanded_flags = _expanded_multi_label_flags(multi_label_flags)
+    for index, rollup in enumerate(rollups):
+        key = (rollup or "").strip()
+        if not key:
+            continue
+        flag = (expanded_flags[index] if index < len(expanded_flags) else "1").strip().lower()
+        result[key] = _is_multi_label_enabled(flag, default=True)
+    return result
+
+
+def _rollups_from_submitted_parts(request) -> tuple[list[str], list[str], dict[str, list[str]], list[str]]:
     part_one = request.POST.getlist("rollup_part_1")
     part_two = request.POST.getlist("rollup_part_2")
     part_three = request.POST.getlist("rollup_part_3")
     aliases = request.POST.getlist("rollup_alias")
+    multi_label_flags = request.POST.getlist("rollup_use_multi_label")
 
-    max_rows = max(len(part_one), len(part_two), len(part_three), len(aliases), 0)
+    max_rows = max(len(part_one), len(part_two), len(part_three), len(aliases), len(multi_label_flags), 0)
     rollups: list[str] = []
     rollup_aliases: list[str] = []
     rollup_parts_map: dict[str, list[str]] = {}
+    rollup_multi_label_flags: list[str] = []
     for index in range(max_rows):
         parts = [
             (part_one[index] if index < len(part_one) else "").strip(),
@@ -213,7 +275,8 @@ def _rollups_from_submitted_parts(request) -> tuple[list[str], list[str], dict[s
         rollups.append(rollup)
         rollup_aliases.append(alias)
         rollup_parts_map[rollup] = selected
-    return _normalized_rollups(rollups), rollup_aliases, rollup_parts_map
+        rollup_multi_label_flags.append(multi_label_flags[index] if index < len(multi_label_flags) else "1")
+    return _normalized_rollups(rollups), rollup_aliases, rollup_parts_map, rollup_multi_label_flags
 
 
 def home(request):
@@ -235,6 +298,7 @@ def product_description(request):
         "selected_ppg_name_column": "",
         "selected_rollup_pairs": [],
         "selected_rollup_parts": request.session.get(PRODUCT_DESCRIPTION_ROLLUP_PARTS_KEY, {}),
+        "selected_rollup_multi_labels": request.session.get(PRODUCT_DESCRIPTION_ROLLUP_MULTI_LABEL_KEY, {}),
     }
 
     stored_scope = request.session.get(PRODUCT_DESCRIPTION_SCOPE_KEY)
@@ -244,8 +308,13 @@ def product_description(request):
 
     selected_rollups = context["selected_rollups"]
     selected_rollup_aliases = context["selected_rollup_aliases"]
+    selected_rollup_multi_labels = context["selected_rollup_multi_labels"]
     context["selected_rollup_pairs"] = [
-        {"value": rollup, "alias": selected_rollup_aliases.get(rollup, rollup)}
+        {
+            "value": rollup,
+            "alias": selected_rollup_aliases.get(rollup, rollup),
+            "use_multi_label": _is_multi_label_enabled(selected_rollup_multi_labels.get(rollup), default=True),
+        }
         for rollup in selected_rollups
     ]
 
@@ -253,9 +322,10 @@ def product_description(request):
         uploaded_scope = request.FILES.get("scope_workbook")
         selected_sheet = (request.POST.get("product_list_sheet") or "").strip()
         selected_ppg_sheet = (request.POST.get("ppg_correspondence_sheet") or "").strip()
-        submitted_rollups_from_parts, submitted_aliases_from_parts, submitted_rollup_parts_map = _rollups_from_submitted_parts(request)
+        submitted_rollups_from_parts, submitted_aliases_from_parts, submitted_rollup_parts_map, submitted_multi_label_flags = _rollups_from_submitted_parts(request)
         submitted_rollups = submitted_rollups_from_parts or _normalized_rollups(request.POST.getlist("rollups"))
         submitted_aliases = submitted_aliases_from_parts or request.POST.getlist("rollup_aliases")
+        submitted_multi_label_flags = submitted_multi_label_flags or request.POST.getlist("rollup_use_multi_label")
         selected_product_list_mapping_column = (
             request.POST.get("product_list_mapping_column") or ""
         ).strip()
@@ -319,15 +389,22 @@ def product_description(request):
 
         if submitted_rollups:
             alias_map = _rollup_alias_map(submitted_rollups, submitted_aliases)
+            multi_label_map = _rollup_multi_label_map(submitted_rollups, submitted_multi_label_flags)
             request.session[PRODUCT_DESCRIPTION_ROLLUPS_KEY] = submitted_rollups
             request.session[PRODUCT_DESCRIPTION_ROLLUP_ALIASES_KEY] = alias_map
             request.session[PRODUCT_DESCRIPTION_ROLLUP_PARTS_KEY] = submitted_rollup_parts_map
+            request.session[PRODUCT_DESCRIPTION_ROLLUP_MULTI_LABEL_KEY] = multi_label_map
             request.session.modified = True
             context["selected_rollups"] = submitted_rollups
             context["selected_rollup_aliases"] = alias_map
+            context["selected_rollup_multi_labels"] = multi_label_map
             context["message"] = "Roll up selection saved for this session."
             context["selected_rollup_pairs"] = [
-                {"value": rollup, "alias": alias_map.get(rollup, rollup)}
+                {
+                    "value": rollup,
+                    "alias": alias_map.get(rollup, rollup),
+                    "use_multi_label": _is_multi_label_enabled(multi_label_map.get(rollup), default=True),
+                }
                 for rollup in submitted_rollups
             ]
             context["selected_rollup_parts"] = submitted_rollup_parts_map
@@ -350,6 +427,7 @@ def product_description(request):
 
             alias_map = request.session.get(PRODUCT_DESCRIPTION_ROLLUP_ALIASES_KEY, {})
             saved_rollup_parts_map = request.session.get(PRODUCT_DESCRIPTION_ROLLUP_PARTS_KEY, {})
+            saved_multi_label_map = request.session.get(PRODUCT_DESCRIPTION_ROLLUP_MULTI_LABEL_KEY, {})
             product_df = _sheet_df_from_workbook(scope_bytes, selected_sheet)
             correspondence_df = _sheet_df_from_workbook(scope_bytes, selected_ppg_sheet)
 
@@ -390,6 +468,7 @@ def product_description(request):
                 correspondence_mapping_column,
                 product_mapping_column,
                 saved_rollup_parts_map,
+                saved_multi_label_map,
             )
 
             if match_count <= 0:
