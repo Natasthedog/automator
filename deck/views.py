@@ -92,6 +92,34 @@ def _build_product_description_df(
             df_ProductDescription[rollup] = _compose_rollup_series(df_ProductDescription, component_columns)
         selected_rollups.append(rollup)
 
+    matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
+    match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
+
+    selected_rollups: list[str] = []
+    for rollup in rollups:
+        component_columns = _rollup_component_columns(rollup, product_columns)
+        if not component_columns:
+            continue
+        if len(component_columns) > 1:
+            df_ProductDescription[rollup] = _compose_rollup_series(df_ProductDescription, component_columns)
+        selected_rollups.append(rollup)
+
+    matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
+    match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
+
+    selected_rollups: list[str] = []
+    for rollup in rollups:
+        component_columns = _rollup_component_columns(rollup, product_columns)
+        if not component_columns:
+            continue
+        if len(component_columns) > 1:
+            df_ProductDescription[rollup] = _compose_rollup_series(df_ProductDescription, component_columns)
+        selected_rollups.append(rollup)
+
+    matched_rows = df_ProductDescription[df_ProductDescription["__mapping_key"] != ""]
+    match_count = int((~matched_rows[product_columns].isna().all(axis=1)).sum()) if product_columns else 0
+
+    selected_rollups = [rollup for rollup in rollups if rollup in product_columns]
     grouped = (
         df_ProductDescription.groupby([ppg_id_column, ppg_name_column], dropna=False)[selected_rollups]
         .agg(_first_non_empty_by_group)

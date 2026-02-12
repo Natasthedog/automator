@@ -174,7 +174,7 @@
                     if (!parts.length) {
                         return;
                     }
-                    const rollup = parts.join("_");
+                    const rollup = selectedValue;
                     const aliasInput = row.querySelector("input[data-alias-input]");
                     const aliasValue = (aliasInput ? aliasInput.value : "").trim() || rollup;
 
@@ -201,7 +201,7 @@
                 const row = document.createElement("div");
                 row.setAttribute("data-rollup-row", "1");
                 row.style.display = "grid";
-                row.style.gridTemplateColumns = "repeat(3, minmax(0, 1fr)) minmax(0, 1fr) auto";
+                row.style.gridTemplateColumns = "minmax(0, 1fr) minmax(0, 1fr) auto";
                 row.style.gap = "0.5rem";
                 row.style.marginTop = "0.5rem";
 
@@ -234,7 +234,7 @@
             }
 
             if (selectedRollups.length) {
-                selectedRollups.forEach((rollup) => addRow((rollup || "").split("_"), selectedRollupAliases[rollup] || rollup));
+                selectedRollups.forEach((rollup) => addRow([rollup || ""], selectedRollupAliases[rollup] || rollup));
             } else {
                 addRow([], "");
             }
