@@ -142,12 +142,13 @@
             const builder = document.getElementById("rollup-builder");
             const addRowButton = document.getElementById("add-rollup-row");
             const rollupValues = document.getElementById("rollup-values");
+            const form = document.getElementById("product-description-form");
 
-            function buildSelect(selectedValue) {
+            function buildSelect(selectedValue, index) {
                 const select = document.createElement("select");
                 const blank = document.createElement("option");
                 blank.value = "";
-                blank.textContent = "-- choose --";
+                blank.textContent = `-- choose column ${index + 1} --`;
                 select.appendChild(blank);
                 columns.forEach((column) => {
                     const option = document.createElement("option");
@@ -158,6 +159,7 @@
                     }
                     select.appendChild(option);
                 });
+                select.setAttribute("aria-label", `Roll-up column ${index + 1}`);
                 return select;
             }
 
@@ -202,9 +204,11 @@
                 row.style.gap = "0.5rem";
                 row.style.marginTop = "0.5rem";
 
-                const select = buildSelect(initialParts && initialParts[0] ? initialParts[0] : "");
-                select.addEventListener("change", updateHiddenInputs);
-                row.appendChild(select);
+                for (let i = 0; i < 3; i += 1) {
+                    const select = buildSelect(initialParts && initialParts[i] ? initialParts[i] : "", i);
+                    select.addEventListener("change", updateHiddenInputs);
+                    row.appendChild(select);
+                }
 
                 const aliasInput = document.createElement("input");
                 aliasInput.type = "text";
@@ -234,6 +238,9 @@
             }
 
             addRowButton.addEventListener("click", () => addRow([], ""));
+            form.addEventListener("submit", () => {
+                updateHiddenInputs();
+            });
         })();
     </script>
 {% endif %}

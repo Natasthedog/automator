@@ -87,6 +87,8 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "Build roll ups")
         self.assertContains(response, "Add another roll up")
         self.assertContains(response, "repeat(3, minmax(0, 1fr))")
+        self.assertContains(response, "choose column 2")
+        self.assertContains(response, "choose column 3")
         self.assertContains(response, "Manufacturer")
         self.assertContains(response, "Brand")
         self.assertContains(response, "Rename roll up")
@@ -97,6 +99,33 @@ class ProductDescriptionViewTests(TestCase):
         self.assertContains(response, "PPG_NAME column")
         self.assertContains(response, "PPG_EAN_CORRESPONDENCE sheet")
         self.assertContains(response, "Generate PRODUCT_DESCRIPTION & Download Scope")
+
+
+    def test_save_rollups_warns_when_no_rollup_values_detected(self):
+        self.client.post(
+            reverse("product-description"),
+            data={
+                "scope_workbook": self._scope_upload(
+                    {
+                        "Product List": ["EAN", "Brand", "Subbrand"],
+                        "PPG_EAN_CORRESPONDENCE": ["PPG_ID", "PPG_NAME", "EAN"],
+                    }
+                )
+            },
+        )
+
+        response = self.client.post(
+            reverse("product-description"),
+            data={
+                "product_list_sheet": "Product List",
+                "ppg_correspondence_sheet": "PPG_EAN_CORRESPONDENCE",
+                "action": "save_rollups",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No roll ups were detected from your selections")
+
 
     def test_generate_scope_downloads_product_description_sheet(self):
         self.client.post(
