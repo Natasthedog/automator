@@ -10,18 +10,105 @@
     {% if error %}
         <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
     {% endif %}
+    {% if warning %}
+        <p class="helper-text" style="color:#92400e;">{{ warning }}</p>
+    {% endif %}
 
     <form method="post" enctype="multipart/form-data" class="form-grid">
         {% csrf_token %}
         <div>
             <label for="scope_workbook">Scope workbook</label>
-            <input id="scope_workbook" type="file" name="scope_workbook" accept=".xlsx,.xls,.xlsb" required>
-            <p class="helper-text">Uses the PRODUCT_DESCRIPTION sheet to map Brand to PPG.</p>
+            <input id="scope_workbook" type="file" name="scope_workbook" accept=".xlsx,.xls,.xlsb">
+            <p class="helper-text">If Brand is missing in BPRV, this will use the Product Description mapping (PPG -> Brand).</p>
         </div>
         <div>
             <label for="bprv_workbook">BPRV workbook</label>
-            <input id="bprv_workbook" type="file" name="bprv_workbook" accept=".xlsx,.xls,.xlsb" required>
+            <input id="bprv_workbook" type="file" name="bprv_workbook" accept=".xlsx,.xls,.xlsb">
         </div>
+
+        {% if scope_sheet_options %}
+        <div>
+            <label for="scope_product_description_sheet">Scope Product Description sheet</label>
+            <select id="scope_product_description_sheet" name="scope_product_description_sheet">
+                <option value="">-- Auto-detect PRODUCT_DESCRIPTION --</option>
+                {% for sheet_name in scope_sheet_options %}
+                    <option value="{{ sheet_name }}" {% if selected_scope_sheet == sheet_name %}selected{% endif %}>{{ sheet_name }}</option>
+                {% endfor %}
+            </select>
+            <p class="helper-text">If PRODUCT_DESCRIPTION cannot be found automatically, choose it manually.</p>
+        </div>
+        {% endif %}
+
+        {% if bprv_columns %}
+        <div>
+            <label for="bprv_ppg_column">BPRV PPG column</label>
+            <select id="bprv_ppg_column" name="bprv_ppg_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_ppg_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bprv_brand_column">BPRV Brand column (optional override)</label>
+            <select id="bprv_brand_column" name="bprv_brand_column">
+                <option value="">-- Auto-detect / leave blank to use scope mapping --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_brand_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+            <p class="helper-text">If BPRV already has Brand, scope Brand lookup is skipped.</p>
+        </div>
+        <div>
+            <label for="bprv_geography_column">BPRV Geography column</label>
+            <select id="bprv_geography_column" name="bprv_geography_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_geography_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bprv_sales_column">BPRV Sales column</label>
+            <select id="bprv_sales_column" name="bprv_sales_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_sales_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bprv_value_column">BPRV value column</label>
+            <select id="bprv_value_column" name="bprv_value_column">
+                <option value="">-- Auto-detect BPRV --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_value_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
+        {% if scope_columns %}
+        <div>
+            <label for="scope_ppg_column">Scope PPG column (used only if BPRV Brand is unavailable)</label>
+            <select id="scope_ppg_column" name="scope_ppg_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in scope_columns %}
+                    <option value="{{ column }}" {% if selected_scope_ppg_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="scope_brand_column">Scope Brand column (used only if BPRV Brand is unavailable)</label>
+            <select id="scope_brand_column" name="scope_brand_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in scope_columns %}
+                    <option value="{{ column }}" {% if selected_scope_brand_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
         <div>
             <button type="submit">Analyze correlation</button>
         </div>

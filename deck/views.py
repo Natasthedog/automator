@@ -518,74 +518,163 @@ def _safe_group_correlation(group: pd.DataFrame, sales_col: str, bprv_col: str) 
     return float(clean[sales_col].corr(clean[bprv_col]))
 
 def preqc_bprv(request):
-    context: dict[str, object] = {"top_results": [], "correlation_intro": ""}
+    context: dict[str, object] = {
+        "top_results": [],
+        "correlation_intro": "",
+        "scope_sheet_options": [],
+        "scope_columns": [],
+        "bprv_columns": [],
+        "selected_scope_sheet": "",
+        "selected_scope_ppg_column": "",
+        "selected_scope_brand_column": "",
+        "selected_bprv_ppg_column": "",
+        "selected_bprv_brand_column": "",
+        "selected_bprv_geography_column": "",
+        "selected_bprv_sales_column": "",
+        "selected_bprv_value_column": "",
+    }
+
+    scope_key = "preqc_bprv_scope_workbook"
+    bprv_key = "preqc_bprv_bprv_workbook"
 
     if request.method == "POST":
-        scope_workbook = request.FILES.get("scope_workbook")
-        bprv_workbook = request.FILES.get("bprv_workbook")
+        scope_upload = request.FILES.get("scope_workbook")
+        bprv_upload = request.FILES.get("bprv_workbook")
+        if scope_upload:
+            request.session[scope_key] = base64.b64encode(scope_upload.read()).decode("ascii")
+            request.session.modified = True
+        if bprv_upload:
+            request.session[bprv_key] = base64.b64encode(bprv_upload.read()).decode("ascii")
+            request.session.modified = True
 
-        if not scope_workbook or not bprv_workbook:
+        scope_encoded = request.session.get(scope_key)
+        bprv_encoded = request.session.get(bprv_key)
+        if not scope_encoded or not bprv_encoded:
             context["error"] = "Please upload both the scope file and the BPRV file."
             return render(request, "deck/PREQC_BPRV.html", context)
 
+        scope_bytes = base64.b64decode(scope_encoded)
+        bprv_bytes = base64.b64decode(bprv_encoded)
+
         try:
-            scope_product_df = pd.read_excel(scope_workbook, sheet_name="PRODUCT_DESCRIPTION", dtype=object)
+            scope_workbook = load_workbook(io.BytesIO(scope_bytes), data_only=True, read_only=True)
+            scope_sheet_names = list(scope_workbook.sheetnames)
+            context["scope_sheet_options"] = scope_sheet_names
         except Exception:
-            context["error"] = "Could not read PRODUCT_DESCRIPTION from the scope file."
+            context["error"] = "Could not read the scope workbook."
             return render(request, "deck/PREQC_BPRV.html", context)
 
         try:
-            bprv_df = pd.read_excel(bprv_workbook, dtype=object)
+            bprv_df = pd.read_excel(io.BytesIO(bprv_bytes), dtype=object)
+            context["bprv_columns"] = list(bprv_df.columns)
         except Exception:
             context["error"] = "Could not read the BPRV workbook. Please verify the file format."
             return render(request, "deck/PREQC_BPRV.html", context)
 
-        scope_brand_col = _find_column_by_candidates(scope_product_df, ["Brand"])
-        scope_ppg_col = _find_column_by_candidates(scope_product_df, ["PPG", "PPG_NAME", "PPG Name"])
-        bprv_brand_col = _find_column_by_candidates(bprv_df, ["Brand"])
-        bprv_ppg_col = _find_column_by_candidates(bprv_df, ["PPG", "PPG_NAME", "PPG Name"])
-        geography_col = _find_column_by_candidates(bprv_df, ["Geography", "Area", "Region", "Market"])
-        sales_col = _find_column_by_candidates(bprv_df, ["Sales", "Value Sales", "Net Sales"])
-        bprv_value_col = _find_column_by_candidates(bprv_df, ["BPRV", "Bprv"])
+        selected_scope_sheet = (request.POST.get("scope_product_description_sheet") or "").strip()
+        auto_scope_sheet = _find_sheet_by_candidates(scope_sheet_names, ["PRODUCT_DESCRIPTION", "Product Description"])
+        scope_sheet = selected_scope_sheet or auto_scope_sheet
+        context["selected_scope_sheet"] = scope_sheet or ""
 
-        required = [scope_brand_col, scope_ppg_col, bprv_brand_col, bprv_ppg_col, geography_col, sales_col, bprv_value_col]
-        if any(value is None for value in required):
-            context["error"] = (
-                "Could not detect required columns. Need Brand and PPG in scope PRODUCT_DESCRIPTION, "
-                "and Geography, Brand, PPG, Sales, BPRV in the BPRV file."
+        if not scope_sheet:
+            context["warning"] = "Could not find the PRODUCT DESCRIPTION sheet automatically. Please identify it."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        try:
+            scope_product_df = pd.read_excel(io.BytesIO(scope_bytes), sheet_name=scope_sheet, dtype=object)
+            context["scope_columns"] = list(scope_product_df.columns)
+        except Exception:
+            context["error"] = "Could not read the selected sheet from the scope workbook."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        selected_bprv_ppg_column = (request.POST.get("bprv_ppg_column") or "").strip()
+        selected_bprv_brand_column = (request.POST.get("bprv_brand_column") or "").strip()
+        selected_bprv_geography_column = (request.POST.get("bprv_geography_column") or "").strip()
+        selected_bprv_sales_column = (request.POST.get("bprv_sales_column") or "").strip()
+        selected_bprv_value_column = (request.POST.get("bprv_value_column") or "").strip()
+        selected_scope_ppg_column = (request.POST.get("scope_ppg_column") or "").strip()
+        selected_scope_brand_column = (request.POST.get("scope_brand_column") or "").strip()
+
+        context["selected_bprv_ppg_column"] = selected_bprv_ppg_column
+        context["selected_bprv_brand_column"] = selected_bprv_brand_column
+        context["selected_bprv_geography_column"] = selected_bprv_geography_column
+        context["selected_bprv_sales_column"] = selected_bprv_sales_column
+        context["selected_bprv_value_column"] = selected_bprv_value_column
+        context["selected_scope_ppg_column"] = selected_scope_ppg_column
+        context["selected_scope_brand_column"] = selected_scope_brand_column
+
+        bprv_ppg_col = selected_bprv_ppg_column or _find_column_by_candidates(bprv_df, ["PPG", "PPG_NAME", "PPG Name"])
+        bprv_brand_col = selected_bprv_brand_column or _find_column_by_candidates(bprv_df, ["Brand"])
+        geography_col = selected_bprv_geography_column or _find_column_by_candidates(
+            bprv_df, ["Geography", "Area", "Region", "Market"]
+        )
+        sales_col = selected_bprv_sales_column or _find_column_by_candidates(bprv_df, ["Sales", "Value Sales", "Net Sales"])
+        bprv_value_col = selected_bprv_value_column or _find_column_by_candidates(bprv_df, ["BPRV", "Bprv"])
+
+        if not bprv_ppg_col:
+            context["warning"] = "Could not find the PPG column in the BPRV file. Please identify it."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        if not geography_col or not sales_col or not bprv_value_col:
+            context["warning"] = (
+                "Could not detect Geography, Sales, or BPRV column in the BPRV file. Please identify those columns."
             )
             return render(request, "deck/PREQC_BPRV.html", context)
 
-        brand_ppg = (
-            scope_product_df[[scope_brand_col, scope_ppg_col]]
-            .dropna()
-            .rename(columns={scope_brand_col: "Brand", scope_ppg_col: "PPG"})
-        )
-        brand_ppg["__brand_key"] = brand_ppg["Brand"].map(_normalized_text)
-        brand_ppg = brand_ppg.drop_duplicates("__brand_key")
+        merged = bprv_df.rename(
+            columns={
+                bprv_ppg_col: "PPG",
+                geography_col: "Geography",
+                sales_col: "Sales",
+                bprv_value_col: "BPRV",
+            }
+        ).copy()
 
-        merged = bprv_df.rename(columns={
-            bprv_brand_col: "Brand",
-            bprv_ppg_col: "PPG",
-            geography_col: "Geography",
-            sales_col: "Sales",
-            bprv_value_col: "BPRV",
-        }).copy()
-        merged["__brand_key"] = merged["Brand"].map(_normalized_text)
-        merged = merged.drop(columns=["PPG"], errors="ignore").merge(
-            brand_ppg[["__brand_key", "PPG"]],
-            on="__brand_key",
-            how="left",
-        )
-        merged = merged.dropna(subset=["PPG"])
+        if bprv_brand_col:
+            merged = merged.rename(columns={bprv_brand_col: "Brand"})
+        else:
+            scope_ppg_col = selected_scope_ppg_column or _find_column_by_candidates(
+                scope_product_df, ["PPG", "PPG_NAME", "PPG Name"]
+            )
+            if not scope_ppg_col:
+                context["warning"] = (
+                    "Could not find the PPG column in the selected scope sheet. Please identify it."
+                )
+                return render(request, "deck/PREQC_BPRV.html", context)
+
+            scope_brand_col = selected_scope_brand_column or _find_column_by_candidates(scope_product_df, ["Brand"])
+            if not scope_brand_col:
+                context["warning"] = (
+                    "Could not find the Brand column in the selected scope sheet. Please identify it."
+                )
+                return render(request, "deck/PREQC_BPRV.html", context)
+
+            context["selected_scope_ppg_column"] = scope_ppg_col
+            context["selected_scope_brand_column"] = scope_brand_col
+            brand_map = (
+                scope_product_df[[scope_ppg_col, scope_brand_col]]
+                .rename(columns={scope_ppg_col: "PPG", scope_brand_col: "Brand"})
+                .dropna(subset=["PPG", "Brand"])
+            )
+            brand_map["__ppg_key"] = brand_map["PPG"].map(_normalized_text)
+            brand_map = brand_map.drop_duplicates("__ppg_key")
+
+            merged["__ppg_key"] = merged["PPG"].map(_normalized_text)
+            merged = merged.merge(brand_map[["__ppg_key", "Brand"]], on="__ppg_key", how="left")
+
+        merged = merged.dropna(subset=["PPG", "Brand"])
 
         grouped = (
             merged.groupby(["Geography", "PPG", "Brand"], dropna=False)
-            .apply(lambda g: pd.Series({
-                "correlation": _safe_group_correlation(g, "Sales", "BPRV"),
-                "total_sales": pd.to_numeric(g["Sales"], errors="coerce").sum(),
-                "n_rows": len(g),
-            }))
+            .apply(
+                lambda g: pd.Series(
+                    {
+                        "correlation": _safe_group_correlation(g, "Sales", "BPRV"),
+                        "total_sales": pd.to_numeric(g["Sales"], errors="coerce").sum(),
+                        "n_rows": len(g),
+                    }
+                )
+            )
             .reset_index()
             .dropna(subset=["correlation"])
             .sort_values(by=["correlation", "total_sales"], ascending=[False, False])
@@ -599,20 +688,11 @@ def preqc_bprv(request):
             grouped.to_excel(writer, index=False, sheet_name="PreQC_BPRV_Correlation")
         report_bytes = report_buffer.getvalue()
 
-        if (request.POST.get("action") or "").strip().lower() == "download_report":
-            response = HttpResponse(
-                report_bytes,
-                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-            response["Content-Disposition"] = 'attachment; filename="preqc_bprv_full_report.xlsx"'
-            return response
-
         context["top_results"] = top_results.to_dict("records")
         context["correlation_intro"] = (
             "Here we check the correlation between Sales and BPRV to identify combinations where "
             "pricing/value movements align most strongly with sales trends."
         )
-        context["report_ready"] = True
         request.session["preqc_bprv_report"] = base64.b64encode(report_bytes).decode("ascii")
         request.session.modified = True
 
@@ -627,8 +707,6 @@ def preqc_bprv(request):
             return response
 
     return render(request, "deck/PREQC_BPRV.html", context)
-
-
 def generate_deck(
     n_clicks,
     data_contents,

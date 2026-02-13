@@ -515,13 +515,44 @@ class PreQCBPRVViewTests(TestCase):
         self.assertContains(response, "Scope workbook")
         self.assertContains(response, "BPRV workbook")
 
-    def test_preqc_bprv_returns_top_correlations(self):
+    def test_preqc_bprv_prompts_for_scope_sheet_when_missing(self):
+        scope = self._workbook_upload(
+            "scope.xlsx",
+            {"Scope Data": [["PPG", "Brand"], ["P1", "BrandA"]]},
+        )
+        bprv = self._workbook_upload(
+            "bprv.xlsx",
+            {"Sheet1": [["Geography", "PPG", "Sales", "BPRV"], ["North", "P1", 100, 10]]},
+        )
+
+        response = self.client.post(reverse("preqc-bprv"), data={"scope_workbook": scope, "bprv_workbook": bprv})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not find the PRODUCT DESCRIPTION sheet automatically")
+        self.assertContains(response, "Scope Data")
+
+    def test_preqc_bprv_prompts_for_ppg_column_when_missing(self):
+        scope = self._workbook_upload(
+            "scope.xlsx",
+            {"PRODUCT_DESCRIPTION": [["PPG", "Brand"], ["P1", "BrandA"]]},
+        )
+        bprv = self._workbook_upload(
+            "bprv.xlsx",
+            {"Sheet1": [["Geography", "Segment", "Sales", "BPRV"], ["North", "P1", 100, 10]]},
+        )
+
+        response = self.client.post(reverse("preqc-bprv"), data={"scope_workbook": scope, "bprv_workbook": bprv})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not find the PPG column in the BPRV file")
+
+    def test_preqc_bprv_uses_brand_from_bprv_when_available(self):
         scope = self._workbook_upload(
             "scope.xlsx",
             {
                 "PRODUCT_DESCRIPTION": [
-                    ["PPG_NAME", "Brand"],
-                    ["PPG One", "BrandA"],
+                    ["PPG_NAME", "Other Column"],
+                    ["PPG One", "x"],
                 ]
             },
         )
@@ -530,9 +561,9 @@ class PreQCBPRVViewTests(TestCase):
             {
                 "Sheet1": [
                     ["Geography", "Brand", "PPG", "Sales", "BPRV"],
-                    ["North", "BrandA", "unused", 100, 10],
-                    ["North", "BrandA", "unused", 200, 20],
-                    ["North", "BrandA", "unused", 300, 30],
+                    ["North", "BrandA", "PPG One", 100, 10],
+                    ["North", "BrandA", "PPG One", 200, 20],
+                    ["North", "BrandA", "PPG One", 300, 30],
                 ]
             },
         )
@@ -546,6 +577,7 @@ class PreQCBPRVViewTests(TestCase):
         self.assertContains(response, "Top 20 Geography, PPG, Brand combinations")
         self.assertContains(response, "North")
         self.assertContains(response, "PPG One")
+        self.assertContains(response, "BrandA")
         self.assertContains(response, "Download full report")
 
     def test_preqc_bprv_downloads_full_report(self):
@@ -562,10 +594,10 @@ class PreQCBPRVViewTests(TestCase):
             "bprv.xlsx",
             {
                 "Sheet1": [
-                    ["Geography", "Brand", "PPG", "Sales", "BPRV"],
-                    ["North", "BrandA", "unused", 100, 10],
-                    ["North", "BrandA", "unused", 200, 20],
-                    ["North", "BrandA", "unused", 300, 30],
+                    ["Geography", "PPG", "Sales", "BPRV"],
+                    ["North", "PPG One", 100, 10],
+                    ["North", "PPG One", 200, 20],
+                    ["North", "PPG One", 300, 30],
                 ]
             },
         )
