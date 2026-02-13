@@ -170,11 +170,11 @@ class DeckAutomationViewsTests(TestCase):
         )
         self.assertEqual(gathered_df.iloc[0]["Target Level Label"], "Alpha")
 
-    def test_file_uploads_page_loads(self):
-        response = self.client.get(reverse("file-uploads"))
+    def test_root_loads_deck_automation_page(self):
+        response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "File Uploads")
+        self.assertContains(response, "Deck Automation (MVP)")
 
     def test_deck_automation_page_loads(self):
         response = self.client.get(reverse("deck-automation"))
@@ -183,26 +183,19 @@ class DeckAutomationViewsTests(TestCase):
         self.assertContains(response, "Deck Automation (MVP)")
         self.assertContains(response, "Bucket config JSON")
 
-    def test_root_loads_file_uploads_page(self):
-        response = self.client.get("/")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "File Uploads")
-
-    def test_deck_automation_requires_file_uploads_first(self):
+    def test_deck_automation_requires_gathered_upload(self):
         response = self.client.post(
             reverse("deck-automation"),
             data={"template_choice": "MMx"},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Please upload files on the File Uploads page to continue.")
+        self.assertContains(response, "Please upload the gatheredCN10 file to continue.")
 
     def test_post_computes_payloads_and_renders_summary(self):
-        self.client.post(reverse("file-uploads"), data={"gathered_cn10": self._csv_upload()})
         response = self.client.post(
             reverse("deck-automation"),
-            data={"template_choice": "MMx"},
+            data={"template_choice": "MMx", "gathered_cn10": self._csv_upload()},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -211,10 +204,9 @@ class DeckAutomationViewsTests(TestCase):
 
 
     def test_post_defaults_template_choice_to_mmx(self):
-        self.client.post(reverse("file-uploads"), data={"gathered_cn10": self._csv_upload()})
         response = self.client.post(
             reverse("deck-automation"),
-            data={},
+            data={"gathered_cn10": self._csv_upload()},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -230,11 +222,11 @@ class DeckAutomationViewsTests(TestCase):
                 }
             }
         )
-        self.client.post(reverse("file-uploads"), data={"gathered_cn10": self._csv_upload()})
         response = self.client.post(
             reverse("deck-automation"),
             data={
                 "template_choice": "MMx",
+                "gathered_cn10": self._csv_upload(),
                 "year1": "Year1",
                 "year2": "Year2",
                 "bucket_config_json": bucket_config_json,
@@ -245,10 +237,9 @@ class DeckAutomationViewsTests(TestCase):
         self.assertContains(response, "Computed")
 
     def test_download_endpoint_returns_json_payloads(self):
-        self.client.post(reverse("file-uploads"), data={"gathered_cn10": self._csv_upload()})
         post_response = self.client.post(
             reverse("deck-automation"),
-            data={"template_choice": "MMM"},
+            data={"template_choice": "MMM", "gathered_cn10": self._csv_upload()},
         )
         self.assertEqual(post_response.status_code, 200)
 

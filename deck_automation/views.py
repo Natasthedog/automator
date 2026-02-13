@@ -93,31 +93,6 @@ def _stored_upload(request, key: str):
     )
 
 
-def file_uploads(request):
-    context: dict[str, object] = {}
-    uploads = request.session.get(SESSION_UPLOADS_KEY, {})
-    context["has_gathered_upload"] = "gathered_cn10" in uploads
-    context["has_scope_upload"] = "scope_workbook" in uploads
-
-    if request.method == "POST":
-        gathered_file = request.FILES.get("gathered_cn10")
-        scope_file = request.FILES.get("scope_workbook")
-
-        if not gathered_file:
-            context["error"] = "Please upload the gatheredCN10 file to continue."
-            return render(request, "deck_automation/file_uploads.html", context)
-
-        _store_upload(request, "gathered_cn10", gathered_file)
-        if scope_file:
-            _store_upload(request, "scope_workbook", scope_file)
-
-        context["message"] = "Uploads saved. Continue to Deck Automation."
-        uploads = request.session.get(SESSION_UPLOADS_KEY, {})
-        context["has_gathered_upload"] = "gathered_cn10" in uploads
-        context["has_scope_upload"] = "scope_workbook" in uploads
-
-    return render(request, "deck_automation/file_uploads.html", context)
-
 def deck_automation(request):
     context: dict[str, object] = {
         "template_options": sorted(TEMPLATE_OPTIONS.keys()),
@@ -126,7 +101,18 @@ def deck_automation(request):
         "year2_value": "Year2",
         "bucket_config_json": "",
     }
+    uploads = request.session.get(SESSION_UPLOADS_KEY, {})
+    context["has_gathered_upload"] = "gathered_cn10" in uploads
+    context["has_scope_upload"] = "scope_workbook" in uploads
+
     if request.method == "POST":
+        uploaded_gathered_file = request.FILES.get("gathered_cn10")
+        uploaded_scope_file = request.FILES.get("scope_workbook")
+        if uploaded_gathered_file:
+            _store_upload(request, "gathered_cn10", uploaded_gathered_file)
+        if uploaded_scope_file:
+            _store_upload(request, "scope_workbook", uploaded_scope_file)
+
         gathered_file = _stored_upload(request, "gathered_cn10")
         scope_file = _stored_upload(request, "scope_workbook")
         selected_template = request.POST.get("template_choice", "").strip() or "MMx"
@@ -142,7 +128,7 @@ def deck_automation(request):
         template_filename = TEMPLATE_OPTIONS.get(selected_template, "MMx.pptx")
 
         if not gathered_file:
-            context["error"] = "Please upload files on the File Uploads page to continue."
+            context["error"] = "Please upload the gatheredCN10 file to continue."
             return render(request, "deck_automation/deck_automation.html", context)
 
         try:
