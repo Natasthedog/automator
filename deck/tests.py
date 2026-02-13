@@ -577,7 +577,8 @@ class PreQCBPRVViewTests(TestCase):
         self.assertContains(response, "Top 20 PPG + Geography combinations")
         self.assertContains(response, "North")
         self.assertContains(response, "PPG One")
-        self.assertContains(response, "Recommended PPG + Geography combinations")
+        self.assertContains(response, "Top 20 PPG + Geography charts")
+        self.assertContains(response, "Active Weeks")
         self.assertContains(response, "Download full report")
 
     def test_preqc_bprv_downloads_full_report(self):

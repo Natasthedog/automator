@@ -548,7 +548,7 @@ def _sales_spike_metrics(group: pd.DataFrame, sales_col: str, bprv_col: str) -> 
 def preqc_bprv(request):
     context: dict[str, object] = {
         "top_results": [],
-        "recommendations": [],
+        "chart_entries": [],
         "correlation_intro": "",
         "scope_sheet_options": [],
         "scope_columns": [],
@@ -561,6 +561,7 @@ def preqc_bprv(request):
         "selected_bprv_geography_column": "",
         "selected_bprv_sales_column": "",
         "selected_bprv_value_column": "",
+        "selected_bprv_week_column": "",
     }
 
     scope_key = "preqc_bprv_scope_workbook"
@@ -621,6 +622,7 @@ def preqc_bprv(request):
         selected_bprv_geography_column = (request.POST.get("bprv_geography_column") or "").strip()
         selected_bprv_sales_column = (request.POST.get("bprv_sales_column") or "").strip()
         selected_bprv_value_column = (request.POST.get("bprv_value_column") or "").strip()
+        selected_bprv_week_column = (request.POST.get("bprv_week_column") or "").strip()
         selected_scope_ppg_column = (request.POST.get("scope_ppg_column") or "").strip()
         selected_scope_brand_column = (request.POST.get("scope_brand_column") or "").strip()
 
@@ -629,6 +631,7 @@ def preqc_bprv(request):
         context["selected_bprv_geography_column"] = selected_bprv_geography_column
         context["selected_bprv_sales_column"] = selected_bprv_sales_column
         context["selected_bprv_value_column"] = selected_bprv_value_column
+        context["selected_bprv_week_column"] = selected_bprv_week_column
         context["selected_scope_ppg_column"] = selected_scope_ppg_column
         context["selected_scope_brand_column"] = selected_scope_brand_column
 
@@ -639,6 +642,9 @@ def preqc_bprv(request):
         )
         sales_col = selected_bprv_sales_column or _find_column_by_candidates(bprv_df, ["Sales", "Value Sales", "Net Sales"])
         bprv_value_col = selected_bprv_value_column or _find_column_by_candidates(bprv_df, ["BPRV", "Bprv"])
+        week_col = selected_bprv_week_column or _find_column_by_candidates(
+            bprv_df, ["Week", "Weeks", "Date", "Period", "Company Week", "Company_Week", "Days"]
+        )
 
         if not bprv_ppg_col:
             context["warning"] = "Could not find the PPG column in the BPRV file. Please identify it."
@@ -650,14 +656,16 @@ def preqc_bprv(request):
             )
             return render(request, "deck/PREQC_BPRV.html", context)
 
-        merged = bprv_df.rename(
-            columns={
-                bprv_ppg_col: "PPG",
-                geography_col: "Geography",
-                sales_col: "Sales",
-                bprv_value_col: "BPRV",
-            }
-        ).copy()
+        rename_map = {
+            bprv_ppg_col: "PPG",
+            geography_col: "Geography",
+            sales_col: "Sales",
+            bprv_value_col: "BPRV",
+        }
+        if week_col:
+            rename_map[week_col] = "Week"
+
+        merged = bprv_df.rename(columns=rename_map).copy()
 
         if bprv_brand_col:
             merged = merged.rename(columns={bprv_brand_col: "Brand"})
@@ -714,36 +722,83 @@ def preqc_bprv(request):
             .sort_values(by=["correlation", "total_sales"], ascending=[False, False])
         )
 
+        grouped = grouped.sort_values(
+            by=["total_sales", "correlation", "spike_lift_pct", "n_rows", "slope"],
+            ascending=[False, False, False, False, False],
+        )
+
         top_results = grouped.head(20).copy()
-        top_results["correlation"] = top_results["correlation"].round(3)
+        top_results["correlation"] = pd.to_numeric(top_results["correlation"], errors="coerce").round(3)
         top_results["slope"] = pd.to_numeric(top_results["slope"], errors="coerce").round(4)
         top_results["spike_lift_pct"] = pd.to_numeric(top_results["spike_lift_pct"], errors="coerce").round(2)
 
-        recommendations = (
-            grouped[
-                (pd.to_numeric(grouped["correlation"], errors="coerce") >= 0.5)
-                & (pd.to_numeric(grouped["slope"], errors="coerce") > 0)
-                & (pd.to_numeric(grouped["spike_lift_pct"], errors="coerce") > 0)
-            ]
-            .sort_values(by=["spike_lift_pct", "correlation"], ascending=[False, False])
-            .head(20)
-            .copy()
-        )
-        recommendations["correlation"] = pd.to_numeric(recommendations["correlation"], errors="coerce").round(3)
-        recommendations["slope"] = pd.to_numeric(recommendations["slope"], errors="coerce").round(4)
-        recommendations["spike_lift_pct"] = pd.to_numeric(recommendations["spike_lift_pct"], errors="coerce").round(2)
+        chart_entries: list[dict[str, object]] = []
+        for _, row in top_results.iterrows():
+            subset = merged[(merged["Geography"] == row["Geography"]) & (merged["PPG"] == row["PPG"])].copy()
+            if subset.empty:
+                continue
+            if "Week" not in subset.columns:
+                subset["Week"] = [f"W{i+1}" for i in range(len(subset))]
+            else:
+                as_dt = pd.to_datetime(subset["Week"], errors="coerce")
+                if as_dt.notna().sum() >= max(2, len(subset) // 2):
+                    subset["__week_sort"] = as_dt
+                    subset = subset.sort_values("__week_sort")
+                    subset["Week"] = subset["__week_sort"].dt.strftime("%Y-%m-%d")
+                else:
+                    subset["Week"] = subset["Week"].astype(str)
+
+            subset["Sales"] = pd.to_numeric(subset["Sales"], errors="coerce")
+            subset["BPRV"] = pd.to_numeric(subset["BPRV"], errors="coerce")
+            subset = subset.dropna(subset=["Sales", "BPRV"]).reset_index(drop=True)
+            if subset.empty:
+                continue
+
+            width, height = 420, 180
+            pad_left, pad_right, pad_top, pad_bottom = 40, 40, 15, 30
+            plot_w = width - pad_left - pad_right
+            plot_h = height - pad_top - pad_bottom
+
+            def _points(values: list[float]) -> str:
+                if len(values) == 1:
+                    xs = [pad_left + plot_w / 2]
+                else:
+                    xs = [pad_left + (plot_w * i / (len(values) - 1)) for i in range(len(values))]
+                v_min = min(values)
+                v_max = max(values)
+                if abs(v_max - v_min) < 1e-12:
+                    ys = [pad_top + plot_h / 2 for _ in values]
+                else:
+                    ys = [pad_top + plot_h - ((v - v_min) / (v_max - v_min) * plot_h) for v in values]
+                return " ".join(f"{x:.2f},{y:.2f}" for x, y in zip(xs, ys))
+
+            sales_values = subset["Sales"].tolist()
+            bprv_values = subset["BPRV"].tolist()
+            chart_entries.append(
+                {
+                    "geography": row["Geography"],
+                    "ppg": row["PPG"],
+                    "week_start": subset["Week"].iloc[0],
+                    "week_end": subset["Week"].iloc[-1],
+                    "sales_line": _points(sales_values),
+                    "bprv_line": _points(bprv_values),
+                    "sales_min": round(float(min(sales_values)), 2),
+                    "sales_max": round(float(max(sales_values)), 2),
+                    "bprv_min": round(float(min(bprv_values)), 2),
+                    "bprv_max": round(float(max(bprv_values)), 2),
+                }
+            )
 
         report_buffer = io.BytesIO()
         with pd.ExcelWriter(report_buffer, engine="openpyxl") as writer:
             grouped.to_excel(writer, index=False, sheet_name="PreQC_BPRV_Correlation")
-            recommendations.to_excel(writer, index=False, sheet_name="PPG_Geo_Recommendations")
         report_bytes = report_buffer.getvalue()
 
         context["top_results"] = top_results.to_dict("records")
-        context["recommendations"] = recommendations.to_dict("records")
+        context["chart_entries"] = chart_entries
         context["correlation_intro"] = (
-            "Here we check the correlation between Sales and BPRV and flag PPG+Geography combinations "
-            "where BPRV tends to increase during sales spikes."
+            "Here we check the correlation between Sales and BPRV and rank the top PPG + Geography "
+            "combinations by Total Sales, Correlation, Spike Lift, Active Weeks, and Slope."
         )
         request.session["preqc_bprv_report"] = base64.b64encode(report_bytes).decode("ascii")
         request.session.modified = True
