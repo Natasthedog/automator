@@ -561,9 +561,9 @@ class PreQCBPRVViewTests(TestCase):
             {
                 "Sheet1": [
                     ["Geography", "Brand", "PPG", "Sales", "BPRV"],
-                    ["North", "BrandA", "PPG One", 100, 10],
-                    ["North", "BrandA", "PPG One", 200, 20],
-                    ["North", "BrandA", "PPG One", 300, 30],
+                    ["North", "BrandA", "PPG One", 100000, 10],
+                    ["North", "BrandA", "PPG One", 200000, 20],
+                    ["North", "BrandA", "PPG One", 300000, 30],
                 ]
             },
         )
@@ -579,6 +579,7 @@ class PreQCBPRVViewTests(TestCase):
         self.assertContains(response, "PPG One")
         self.assertContains(response, "Top 20 PPG + Geography charts")
         self.assertContains(response, "Active Weeks")
+        self.assertContains(response, "600,000")
         self.assertContains(response, "Download full report")
 
     def test_preqc_bprv_downloads_full_report(self):

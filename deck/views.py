@@ -731,6 +731,9 @@ def preqc_bprv(request):
         top_results["correlation"] = pd.to_numeric(top_results["correlation"], errors="coerce").round(3)
         top_results["slope"] = pd.to_numeric(top_results["slope"], errors="coerce").round(4)
         top_results["spike_lift_pct"] = pd.to_numeric(top_results["spike_lift_pct"], errors="coerce").round(2)
+        top_results["total_sales_display"] = top_results["total_sales"].map(
+            lambda v: f"{float(v):,.0f}" if pd.notna(v) else ""
+        )
 
         chart_entries: list[dict[str, object]] = []
         for _, row in top_results.iterrows():
@@ -740,13 +743,10 @@ def preqc_bprv(request):
             if "Week" not in subset.columns:
                 subset["Week"] = [f"W{i+1}" for i in range(len(subset))]
             else:
-                as_dt = pd.to_datetime(subset["Week"], errors="coerce")
-                if as_dt.notna().sum() >= max(2, len(subset) // 2):
-                    subset["__week_sort"] = as_dt
-                    subset = subset.sort_values("__week_sort")
-                    subset["Week"] = subset["__week_sort"].dt.strftime("%Y-%m-%d")
-                else:
-                    subset["Week"] = subset["Week"].astype(str)
+                subset["Week"] = subset["Week"].astype(str).str.strip()
+                subset["__week_num"] = pd.to_numeric(subset["Week"], errors="coerce")
+                if subset["__week_num"].notna().any():
+                    subset = subset.sort_values(by=["__week_num", "Week"], kind="stable")
 
             subset["Sales"] = pd.to_numeric(subset["Sales"], errors="coerce")
             subset["BPRV"] = pd.to_numeric(subset["BPRV"], errors="coerce")
@@ -784,6 +784,8 @@ def preqc_bprv(request):
                     "bprv_line": _points(bprv_values),
                     "sales_min": round(float(min(sales_values)), 2),
                     "sales_max": round(float(max(sales_values)), 2),
+                    "sales_min_display": f"{float(min(sales_values)):,.0f}",
+                    "sales_max_display": f"{float(max(sales_values)):,.0f}",
                     "bprv_min": round(float(min(bprv_values)), 2),
                     "bprv_max": round(float(max(bprv_values)), 2),
                 }

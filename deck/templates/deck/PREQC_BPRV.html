@@ -144,7 +144,7 @@
                         <tr>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.Geography }}</td>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.PPG }}</td>
-                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.total_sales|floatformat:0 }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.total_sales_display }}</td>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.correlation }}</td>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.spike_lift_pct }}</td>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.n_rows }}</td>
@@ -169,8 +169,8 @@
                         <polyline fill="none" stroke="#dc2626" stroke-width="2" points="{{ chart.bprv_line }}"/>
                         <text x="20" y="20" font-size="9" fill="#2563eb">Sales</text>
                         <text x="385" y="20" font-size="9" fill="#dc2626">BPRV</text>
-                        <text x="5" y="32" font-size="9" fill="#2563eb">{{ chart.sales_max }}</text>
-                        <text x="5" y="150" font-size="9" fill="#2563eb">{{ chart.sales_min }}</text>
+                        <text x="5" y="32" font-size="9" fill="#2563eb">{{ chart.sales_max_display }}</text>
+                        <text x="5" y="150" font-size="9" fill="#2563eb">{{ chart.sales_min_display }}</text>
                         <text x="385" y="32" font-size="9" fill="#dc2626">{{ chart.bprv_max }}</text>
                         <text x="385" y="150" font-size="9" fill="#dc2626">{{ chart.bprv_min }}</text>
                     </svg>
