@@ -489,3 +489,125 @@ class ProductDescriptionViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Please identify those columns before generating PRODUCT_DESCRIPTION")
+
+
+class PreQCBPRVViewTests(TestCase):
+    def _workbook_upload(self, name: str, sheets: dict[str, list[list[object]]]) -> SimpleUploadedFile:
+        workbook = Workbook()
+        default = workbook.active
+        workbook.remove(default)
+        for sheet_name, rows in sheets.items():
+            ws = workbook.create_sheet(title=sheet_name)
+            for row in rows:
+                ws.append(row)
+        buf = io.BytesIO()
+        workbook.save(buf)
+        return SimpleUploadedFile(
+            name,
+            buf.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    def test_preqc_bprv_page_renders(self):
+        response = self.client.get(reverse("preqc-bprv"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "PreQC BPRV")
+        self.assertContains(response, "Scope workbook")
+        self.assertContains(response, "BPRV workbook")
+
+    def test_preqc_bprv_prompts_for_scope_sheet_when_missing(self):
+        scope = self._workbook_upload(
+            "scope.xlsx",
+            {"Scope Data": [["PPG", "Brand"], ["P1", "BrandA"]]},
+        )
+        bprv = self._workbook_upload(
+            "bprv.xlsx",
+            {"Sheet1": [["Geography", "PPG", "Sales", "BPRV"], ["North", "P1", 100, 10]]},
+        )
+
+        response = self.client.post(reverse("preqc-bprv"), data={"scope_workbook": scope, "bprv_workbook": bprv})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not find the PRODUCT DESCRIPTION sheet automatically")
+        self.assertContains(response, "Scope Data")
+
+    def test_preqc_bprv_prompts_for_ppg_column_when_missing(self):
+        scope = self._workbook_upload(
+            "scope.xlsx",
+            {"PRODUCT_DESCRIPTION": [["PPG", "Brand"], ["P1", "BrandA"]]},
+        )
+        bprv = self._workbook_upload(
+            "bprv.xlsx",
+            {"Sheet1": [["Geography", "Segment", "Sales", "BPRV"], ["North", "P1", 100, 10]]},
+        )
+
+        response = self.client.post(reverse("preqc-bprv"), data={"scope_workbook": scope, "bprv_workbook": bprv})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Could not find the PPG column in the BPRV file")
+
+    def test_preqc_bprv_uses_brand_from_bprv_when_available(self):
+        scope = self._workbook_upload(
+            "scope.xlsx",
+            {
+                "PRODUCT_DESCRIPTION": [
+                    ["PPG_NAME", "Other Column"],
+                    ["PPG One", "x"],
+                ]
+            },
+        )
+        bprv = self._workbook_upload(
+            "bprv.xlsx",
+            {
+                "Sheet1": [
+                    ["Geography", "Brand", "PPG", "Sales", "BPRV"],
+                    ["North", "BrandA", "PPG One", 100, 10],
+                    ["North", "BrandA", "PPG One", 200, 20],
+                    ["North", "BrandA", "PPG One", 300, 30],
+                ]
+            },
+        )
+
+        response = self.client.post(
+            reverse("preqc-bprv"),
+            data={"scope_workbook": scope, "bprv_workbook": bprv},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Top 20 Geography, PPG, Brand combinations")
+        self.assertContains(response, "North")
+        self.assertContains(response, "PPG One")
+        self.assertContains(response, "BrandA")
+        self.assertContains(response, "Download full report")
+
+    def test_preqc_bprv_downloads_full_report(self):
+        scope = self._workbook_upload(
+            "scope.xlsx",
+            {
+                "PRODUCT_DESCRIPTION": [
+                    ["PPG_NAME", "Brand"],
+                    ["PPG One", "BrandA"],
+                ]
+            },
+        )
+        bprv = self._workbook_upload(
+            "bprv.xlsx",
+            {
+                "Sheet1": [
+                    ["Geography", "PPG", "Sales", "BPRV"],
+                    ["North", "PPG One", 100, 10],
+                    ["North", "PPG One", 200, 20],
+                    ["North", "PPG One", 300, 30],
+                ]
+            },
+        )
+
+        self.client.post(reverse("preqc-bprv"), data={"scope_workbook": scope, "bprv_workbook": bprv})
+        response = self.client.get(reverse("preqc-bprv") + "?action=download_report")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn("preqc_bprv_full_report.xlsx", response["Content-Disposition"])
