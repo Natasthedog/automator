@@ -517,9 +517,38 @@ def _safe_group_correlation(group: pd.DataFrame, sales_col: str, bprv_col: str) 
         return None
     return float(clean[sales_col].corr(clean[bprv_col]))
 
+
+def _sales_spike_metrics(group: pd.DataFrame, sales_col: str, bprv_col: str) -> pd.Series:
+    clean = group[[sales_col, bprv_col]].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(clean) < 4:
+        return pd.Series({"slope": None, "spike_lift_pct": None, "spike_rows": 0})
+
+    sales_variance = clean[sales_col].var()
+    slope = None
+    if sales_variance and sales_variance > 1e-12:
+        slope = float(clean[sales_col].cov(clean[bprv_col]) / sales_variance)
+
+    threshold = clean[sales_col].quantile(0.75)
+    is_spike = clean[sales_col] >= threshold
+    spike_rows = int(is_spike.sum())
+    non_spike_rows = int((~is_spike).sum())
+    if spike_rows < 2 or non_spike_rows < 2:
+        return pd.Series({"slope": slope, "spike_lift_pct": None, "spike_rows": spike_rows})
+
+    spike_mean = clean.loc[is_spike, bprv_col].mean()
+    non_spike_mean = clean.loc[~is_spike, bprv_col].mean()
+    if pd.isna(non_spike_mean) or abs(non_spike_mean) < 1e-12:
+        spike_lift_pct = None
+    else:
+        spike_lift_pct = float(((spike_mean - non_spike_mean) / abs(non_spike_mean)) * 100)
+
+    return pd.Series({"slope": slope, "spike_lift_pct": spike_lift_pct, "spike_rows": spike_rows})
+
+
 def preqc_bprv(request):
     context: dict[str, object] = {
         "top_results": [],
+        "recommendations": [],
         "correlation_intro": "",
         "scope_sheet_options": [],
         "scope_columns": [],
@@ -665,14 +694,19 @@ def preqc_bprv(request):
         merged = merged.dropna(subset=["PPG", "Brand"])
 
         grouped = (
-            merged.groupby(["Geography", "PPG", "Brand"], dropna=False)
+            merged.groupby(["Geography", "PPG"], dropna=False)
             .apply(
-                lambda g: pd.Series(
-                    {
-                        "correlation": _safe_group_correlation(g, "Sales", "BPRV"),
-                        "total_sales": pd.to_numeric(g["Sales"], errors="coerce").sum(),
-                        "n_rows": len(g),
-                    }
+                lambda g: pd.concat(
+                    [
+                        pd.Series(
+                            {
+                                "correlation": _safe_group_correlation(g, "Sales", "BPRV"),
+                                "total_sales": pd.to_numeric(g["Sales"], errors="coerce").sum(),
+                                "n_rows": len(g),
+                            }
+                        ),
+                        _sales_spike_metrics(g, "Sales", "BPRV"),
+                    ]
                 )
             )
             .reset_index()
@@ -682,16 +716,34 @@ def preqc_bprv(request):
 
         top_results = grouped.head(20).copy()
         top_results["correlation"] = top_results["correlation"].round(3)
+        top_results["slope"] = pd.to_numeric(top_results["slope"], errors="coerce").round(4)
+        top_results["spike_lift_pct"] = pd.to_numeric(top_results["spike_lift_pct"], errors="coerce").round(2)
+
+        recommendations = (
+            grouped[
+                (pd.to_numeric(grouped["correlation"], errors="coerce") >= 0.5)
+                & (pd.to_numeric(grouped["slope"], errors="coerce") > 0)
+                & (pd.to_numeric(grouped["spike_lift_pct"], errors="coerce") > 0)
+            ]
+            .sort_values(by=["spike_lift_pct", "correlation"], ascending=[False, False])
+            .head(20)
+            .copy()
+        )
+        recommendations["correlation"] = pd.to_numeric(recommendations["correlation"], errors="coerce").round(3)
+        recommendations["slope"] = pd.to_numeric(recommendations["slope"], errors="coerce").round(4)
+        recommendations["spike_lift_pct"] = pd.to_numeric(recommendations["spike_lift_pct"], errors="coerce").round(2)
 
         report_buffer = io.BytesIO()
         with pd.ExcelWriter(report_buffer, engine="openpyxl") as writer:
             grouped.to_excel(writer, index=False, sheet_name="PreQC_BPRV_Correlation")
+            recommendations.to_excel(writer, index=False, sheet_name="PPG_Geo_Recommendations")
         report_bytes = report_buffer.getvalue()
 
         context["top_results"] = top_results.to_dict("records")
+        context["recommendations"] = recommendations.to_dict("records")
         context["correlation_intro"] = (
-            "Here we check the correlation between Sales and BPRV to identify combinations where "
-            "pricing/value movements align most strongly with sales trends."
+            "Here we check the correlation between Sales and BPRV and flag PPG+Geography combinations "
+            "where BPRV tends to increase during sales spikes."
         )
         request.session["preqc_bprv_report"] = base64.b64encode(report_bytes).decode("ascii")
         request.session.modified = True

@@ -118,15 +118,47 @@
         <hr style="margin:1.5rem 0;border:none;border-top:1px solid #e5e7eb;">
         <p>{{ correlation_intro }}</p>
 
-        <h2>Top 20 Geography, PPG, Brand combinations by Sales ↔ BPRV correlation</h2>
+        {% if recommendations %}
+            <h2>Recommended PPG + Geography combinations where BPRV rises with sales spikes</h2>
+            <p class="helper-text">Recommendation rule: positive correlation (r ≥ 0.5), positive slope, and positive BPRV lift during top-quartile Sales spikes.</p>
+            <div style="overflow-x:auto;">
+                <table style="width:100%; border-collapse: collapse; margin-top:0.75rem;">
+                    <thead>
+                        <tr style="background:#ecfeff;">
+                            <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">Geography</th>
+                            <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">PPG</th>
+                            <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Correlation</th>
+                            <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Slope</th>
+                            <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Spike Lift %</th>
+                            <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Rows</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in recommendations %}
+                            <tr>
+                                <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.Geography }}</td>
+                                <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.PPG }}</td>
+                                <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.correlation }}</td>
+                                <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.slope }}</td>
+                                <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.spike_lift_pct }}</td>
+                                <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.n_rows }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+
+        <h2>Top 20 PPG + Geography combinations by Sales ↔ BPRV correlation</h2>
         <div style="overflow-x:auto;">
             <table style="width:100%; border-collapse: collapse; margin-top:0.75rem;">
                 <thead>
                     <tr style="background:#f3f4f6;">
                         <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">Geography</th>
                         <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">PPG</th>
-                        <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">Brand</th>
                         <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Correlation</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Slope</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Spike Lift %</th>
                         <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Total Sales</th>
                         <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Rows</th>
                     </tr>
@@ -136,8 +168,9 @@
                         <tr>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.Geography }}</td>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.PPG }}</td>
-                            <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.Brand }}</td>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.correlation }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.slope }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.spike_lift_pct }}</td>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.total_sales|floatformat:0 }}</td>
                             <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.n_rows }}</td>
                         </tr>
@@ -150,11 +183,11 @@
         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:0.5rem;">
             {% for row in top_results %}
                 <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:0.5rem;">
-                    <p style="margin:0;font-size:0.85rem;">{{ row.Geography }} · {{ row.PPG }} · {{ row.Brand }}</p>
+                    <p style="margin:0;font-size:0.85rem;">{{ row.Geography }} · {{ row.PPG }}</p>
                     <div style="height:10px; background:#dbeafe; border-radius:99px; margin-top:0.4rem;">
                         <div style="height:10px; width:{% widthratio row.correlation 1 100 %}%; background:#2563eb; border-radius:99px;"></div>
                     </div>
-                    <p style="margin:0.4rem 0 0 0; font-size:0.8rem; color:#1e3a8a;">r = {{ row.correlation }}</p>
+                    <p style="margin:0.4rem 0 0 0; font-size:0.8rem; color:#1e3a8a;">r = {{ row.correlation }} | lift={{ row.spike_lift_pct }}%</p>
                 </div>
             {% endfor %}
         </div>

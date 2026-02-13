@@ -574,10 +574,10 @@ class PreQCBPRVViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Top 20 Geography, PPG, Brand combinations")
+        self.assertContains(response, "Top 20 PPG + Geography combinations")
         self.assertContains(response, "North")
         self.assertContains(response, "PPG One")
-        self.assertContains(response, "BrandA")
+        self.assertContains(response, "Recommended PPG + Geography combinations")
         self.assertContains(response, "Download full report")
 
     def test_preqc_bprv_downloads_full_report(self):
