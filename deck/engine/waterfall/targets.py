@@ -68,8 +68,13 @@ def modelled_category_from_scope_df(scope_df):
     return None
 
 
-def _normalize_column_name(value: str) -> str:
-    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
+def _normalize_column_name(value: object) -> str:
+    if isinstance(value, (list, tuple, set)):
+        value = " ".join(str(item) for item in value if item is not None)
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    return "".join(ch for ch in text if ch.isalnum())
 
 
 def _find_sheet_by_candidates(sheet_names: list[str], target: str) -> str | None:

@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block title %}PreQC BPRV{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1>PreQC BPRV</h1>
+    <p>Upload the scope workbook and the BPRV workbook to evaluate Sales and BPRV relationship quality before the next stage.</p>
+
+    {% if error %}
+        <p class="helper-text" style="color:#b91c1c;">{{ error }}</p>
+    {% endif %}
+    {% if warning %}
+        <p class="helper-text" style="color:#92400e;">{{ warning }}</p>
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+        {% csrf_token %}
+        <div>
+            <label for="scope_workbook">Scope workbook</label>
+            <input id="scope_workbook" type="file" name="scope_workbook" accept=".xlsx,.xls,.xlsb">
+            <p class="helper-text">If Brand is missing in BPRV, this will use the Product Description mapping (PPG -> Brand).</p>
+        </div>
+        <div>
+            <label for="bprv_workbook">BPRV workbook</label>
+            <input id="bprv_workbook" type="file" name="bprv_workbook" accept=".xlsx,.xls,.xlsb">
+        </div>
+
+        {% if scope_sheet_options %}
+        <div>
+            <label for="scope_product_description_sheet">Scope Product Description sheet</label>
+            <select id="scope_product_description_sheet" name="scope_product_description_sheet">
+                <option value="">-- Auto-detect PRODUCT_DESCRIPTION --</option>
+                {% for sheet_name in scope_sheet_options %}
+                    <option value="{{ sheet_name }}" {% if selected_scope_sheet == sheet_name %}selected{% endif %}>{{ sheet_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
+        {% if bprv_columns %}
+        <div>
+            <label for="bprv_ppg_column">BPRV PPG column</label>
+            <select id="bprv_ppg_column" name="bprv_ppg_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_ppg_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bprv_brand_column">BPRV Brand column (optional override)</label>
+            <select id="bprv_brand_column" name="bprv_brand_column">
+                <option value="">-- Auto-detect / leave blank to use scope mapping --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_brand_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bprv_geography_column">BPRV Geography column</label>
+            <select id="bprv_geography_column" name="bprv_geography_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_geography_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bprv_week_column">BPRV Week column (optional)</label>
+            <select id="bprv_week_column" name="bprv_week_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_week_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bprv_sales_column">BPRV Sales column</label>
+            <select id="bprv_sales_column" name="bprv_sales_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_sales_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="bprv_value_column">BPRV value column</label>
+            <select id="bprv_value_column" name="bprv_value_column">
+                <option value="">-- Auto-detect BPRV --</option>
+                {% for column in bprv_columns %}
+                    <option value="{{ column }}" {% if selected_bprv_value_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
+        {% if scope_columns %}
+        <div>
+            <label for="scope_ppg_column">Scope PPG column (used only if BPRV Brand is unavailable)</label>
+            <select id="scope_ppg_column" name="scope_ppg_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in scope_columns %}
+                    <option value="{{ column }}" {% if selected_scope_ppg_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label for="scope_brand_column">Scope Brand column (used only if BPRV Brand is unavailable)</label>
+            <select id="scope_brand_column" name="scope_brand_column">
+                <option value="">-- Auto-detect --</option>
+                {% for column in scope_columns %}
+                    <option value="{{ column }}" {% if selected_scope_brand_column == column %}selected{% endif %}>{{ column }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
+        <div>
+            <button type="submit">Analyze correlation</button>
+        </div>
+    </form>
+
+    {% if top_results %}
+        <hr style="margin:1.5rem 0;border:none;border-top:1px solid #e5e7eb;">
+        <p>{{ correlation_intro }}</p>
+
+        <h2>Top 20 PPG + Geography combinations</h2>
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse: collapse; margin-top:0.75rem;">
+                <thead>
+                    <tr style="background:#f3f4f6;">
+                        <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">Geography</th>
+                        <th style="text-align:left;padding:0.5rem;border:1px solid #e5e7eb;">PPG</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Total Sales</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Correlation</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Spike Lift %</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Active Weeks</th>
+                        <th style="text-align:right;padding:0.5rem;border:1px solid #e5e7eb;">Slope</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in top_results %}
+                        <tr>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.Geography }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;">{{ row.PPG }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.total_sales|floatformat:0 }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.correlation }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.spike_lift_pct }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.n_rows }}</td>
+                            <td style="padding:0.5rem;border:1px solid #e5e7eb;text-align:right;">{{ row.slope }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <h3 style="margin-top:1.25rem;">Top 20 PPG + Geography charts (Weeks on X-axis, Sales on Y1, BPRV on Y2)</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:1rem;">
+            {% for chart in chart_entries %}
+                <div style="border:1px solid #e5e7eb;border-radius:10px;padding:0.75rem;background:#fff;">
+                    <p style="margin:0 0 0.4rem 0;font-weight:600;">{{ chart.geography }} · {{ chart.ppg }}</p>
+                    <p class="helper-text" style="margin:0 0 0.35rem 0;">Weeks: {{ chart.week_start }} → {{ chart.week_end }}</p>
+                    <svg viewBox="0 0 420 180" width="100%" height="180" role="img" aria-label="Sales and BPRV trend chart">
+                        <line x1="40" y1="15" x2="40" y2="150" stroke="#9ca3af" stroke-width="1"/>
+                        <line x1="380" y1="15" x2="380" y2="150" stroke="#9ca3af" stroke-width="1"/>
+                        <line x1="40" y1="150" x2="380" y2="150" stroke="#9ca3af" stroke-width="1"/>
+                        <polyline fill="none" stroke="#2563eb" stroke-width="2" points="{{ chart.sales_line }}"/>
+                        <polyline fill="none" stroke="#dc2626" stroke-width="2" points="{{ chart.bprv_line }}"/>
+                        <text x="20" y="20" font-size="9" fill="#2563eb">Sales</text>
+                        <text x="385" y="20" font-size="9" fill="#dc2626">BPRV</text>
+                        <text x="5" y="32" font-size="9" fill="#2563eb">{{ chart.sales_max }}</text>
+                        <text x="5" y="150" font-size="9" fill="#2563eb">{{ chart.sales_min }}</text>
+                        <text x="385" y="32" font-size="9" fill="#dc2626">{{ chart.bprv_max }}</text>
+                        <text x="385" y="150" font-size="9" fill="#dc2626">{{ chart.bprv_min }}</text>
+                    </svg>
+                </div>
+            {% endfor %}
+        </div>
+
+        <form method="get" style="margin-top:1rem;">
+            <input type="hidden" name="action" value="download_report">
+            <button type="submit">Download full report</button>
+        </form>
+    {% endif %}
+</div>
+{% endblock %}

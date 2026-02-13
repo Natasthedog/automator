@@ -493,6 +493,327 @@ def product_description(request):
     return render(request, "deck/PRODUCT_DESCRIPTION.html", context)
 
 
+
+
+def _find_column_by_candidates(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    column_lookup = {_normalized_text(column): column for column in df.columns}
+    for candidate in candidates:
+        key = _normalized_text(candidate)
+        if key in column_lookup:
+            return column_lookup[key]
+    for candidate in candidates:
+        key = _normalized_text(candidate)
+        for normalized_column, original in column_lookup.items():
+            if key and (key in normalized_column or normalized_column in key):
+                return original
+    return None
+
+
+def _safe_group_correlation(group: pd.DataFrame, sales_col: str, bprv_col: str) -> float | None:
+    clean = group[[sales_col, bprv_col]].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(clean) < 3:
+        return None
+    if clean[sales_col].std() < 1e-6 or clean[bprv_col].std() < 1e-6:
+        return None
+    return float(clean[sales_col].corr(clean[bprv_col]))
+
+
+def _sales_spike_metrics(group: pd.DataFrame, sales_col: str, bprv_col: str) -> pd.Series:
+    clean = group[[sales_col, bprv_col]].apply(pd.to_numeric, errors="coerce").dropna()
+    if len(clean) < 4:
+        return pd.Series({"slope": None, "spike_lift_pct": None, "spike_rows": 0})
+
+    sales_variance = clean[sales_col].var()
+    slope = None
+    if sales_variance and sales_variance > 1e-12:
+        slope = float(clean[sales_col].cov(clean[bprv_col]) / sales_variance)
+
+    threshold = clean[sales_col].quantile(0.75)
+    is_spike = clean[sales_col] >= threshold
+    spike_rows = int(is_spike.sum())
+    non_spike_rows = int((~is_spike).sum())
+    if spike_rows < 2 or non_spike_rows < 2:
+        return pd.Series({"slope": slope, "spike_lift_pct": None, "spike_rows": spike_rows})
+
+    spike_mean = clean.loc[is_spike, bprv_col].mean()
+    non_spike_mean = clean.loc[~is_spike, bprv_col].mean()
+    if pd.isna(non_spike_mean) or abs(non_spike_mean) < 1e-12:
+        spike_lift_pct = None
+    else:
+        spike_lift_pct = float(((spike_mean - non_spike_mean) / abs(non_spike_mean)) * 100)
+
+    return pd.Series({"slope": slope, "spike_lift_pct": spike_lift_pct, "spike_rows": spike_rows})
+
+
+def preqc_bprv(request):
+    context: dict[str, object] = {
+        "top_results": [],
+        "chart_entries": [],
+        "correlation_intro": "",
+        "scope_sheet_options": [],
+        "scope_columns": [],
+        "bprv_columns": [],
+        "selected_scope_sheet": "",
+        "selected_scope_ppg_column": "",
+        "selected_scope_brand_column": "",
+        "selected_bprv_ppg_column": "",
+        "selected_bprv_brand_column": "",
+        "selected_bprv_geography_column": "",
+        "selected_bprv_sales_column": "",
+        "selected_bprv_value_column": "",
+        "selected_bprv_week_column": "",
+    }
+
+    scope_key = "preqc_bprv_scope_workbook"
+    bprv_key = "preqc_bprv_bprv_workbook"
+
+    if request.method == "POST":
+        scope_upload = request.FILES.get("scope_workbook")
+        bprv_upload = request.FILES.get("bprv_workbook")
+        if scope_upload:
+            request.session[scope_key] = base64.b64encode(scope_upload.read()).decode("ascii")
+            request.session.modified = True
+        if bprv_upload:
+            request.session[bprv_key] = base64.b64encode(bprv_upload.read()).decode("ascii")
+            request.session.modified = True
+
+        scope_encoded = request.session.get(scope_key)
+        bprv_encoded = request.session.get(bprv_key)
+        if not scope_encoded or not bprv_encoded:
+            context["error"] = "Please upload both the scope file and the BPRV file."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        scope_bytes = base64.b64decode(scope_encoded)
+        bprv_bytes = base64.b64decode(bprv_encoded)
+
+        try:
+            scope_workbook = load_workbook(io.BytesIO(scope_bytes), data_only=True, read_only=True)
+            scope_sheet_names = list(scope_workbook.sheetnames)
+            context["scope_sheet_options"] = scope_sheet_names
+        except Exception:
+            context["error"] = "Could not read the scope workbook."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        try:
+            bprv_df = pd.read_excel(io.BytesIO(bprv_bytes), dtype=object)
+            context["bprv_columns"] = list(bprv_df.columns)
+        except Exception:
+            context["error"] = "Could not read the BPRV workbook. Please verify the file format."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        selected_scope_sheet = (request.POST.get("scope_product_description_sheet") or "").strip()
+        auto_scope_sheet = _find_sheet_by_candidates(scope_sheet_names, ["PRODUCT_DESCRIPTION", "Product Description"])
+        scope_sheet = selected_scope_sheet or auto_scope_sheet
+        context["selected_scope_sheet"] = scope_sheet or ""
+
+        if not scope_sheet:
+            context["warning"] = "Could not find the PRODUCT DESCRIPTION sheet automatically. Please identify it."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        try:
+            scope_product_df = pd.read_excel(io.BytesIO(scope_bytes), sheet_name=scope_sheet, dtype=object)
+            context["scope_columns"] = list(scope_product_df.columns)
+        except Exception:
+            context["error"] = "Could not read the selected sheet from the scope workbook."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        selected_bprv_ppg_column = (request.POST.get("bprv_ppg_column") or "").strip()
+        selected_bprv_brand_column = (request.POST.get("bprv_brand_column") or "").strip()
+        selected_bprv_geography_column = (request.POST.get("bprv_geography_column") or "").strip()
+        selected_bprv_sales_column = (request.POST.get("bprv_sales_column") or "").strip()
+        selected_bprv_value_column = (request.POST.get("bprv_value_column") or "").strip()
+        selected_bprv_week_column = (request.POST.get("bprv_week_column") or "").strip()
+        selected_scope_ppg_column = (request.POST.get("scope_ppg_column") or "").strip()
+        selected_scope_brand_column = (request.POST.get("scope_brand_column") or "").strip()
+
+        context["selected_bprv_ppg_column"] = selected_bprv_ppg_column
+        context["selected_bprv_brand_column"] = selected_bprv_brand_column
+        context["selected_bprv_geography_column"] = selected_bprv_geography_column
+        context["selected_bprv_sales_column"] = selected_bprv_sales_column
+        context["selected_bprv_value_column"] = selected_bprv_value_column
+        context["selected_bprv_week_column"] = selected_bprv_week_column
+        context["selected_scope_ppg_column"] = selected_scope_ppg_column
+        context["selected_scope_brand_column"] = selected_scope_brand_column
+
+        bprv_ppg_col = selected_bprv_ppg_column or _find_column_by_candidates(bprv_df, ["PPG", "PPG_NAME", "PPG Name"])
+        bprv_brand_col = selected_bprv_brand_column or _find_column_by_candidates(bprv_df, ["Brand"])
+        geography_col = selected_bprv_geography_column or _find_column_by_candidates(
+            bprv_df, ["Geography", "Area", "Region", "Market"]
+        )
+        sales_col = selected_bprv_sales_column or _find_column_by_candidates(bprv_df, ["Sales", "Value Sales", "Net Sales"])
+        bprv_value_col = selected_bprv_value_column or _find_column_by_candidates(bprv_df, ["BPRV", "Bprv"])
+        week_col = selected_bprv_week_column or _find_column_by_candidates(
+            bprv_df, ["Week", "Weeks", "Date", "Period", "Company Week", "Company_Week", "Days"]
+        )
+
+        if not bprv_ppg_col:
+            context["warning"] = "Could not find the PPG column in the BPRV file. Please identify it."
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        if not geography_col or not sales_col or not bprv_value_col:
+            context["warning"] = (
+                "Could not detect Geography, Sales, or BPRV column in the BPRV file. Please identify those columns."
+            )
+            return render(request, "deck/PREQC_BPRV.html", context)
+
+        rename_map = {
+            bprv_ppg_col: "PPG",
+            geography_col: "Geography",
+            sales_col: "Sales",
+            bprv_value_col: "BPRV",
+        }
+        if week_col:
+            rename_map[week_col] = "Week"
+
+        merged = bprv_df.rename(columns=rename_map).copy()
+
+        if bprv_brand_col:
+            merged = merged.rename(columns={bprv_brand_col: "Brand"})
+        else:
+            scope_ppg_col = selected_scope_ppg_column or _find_column_by_candidates(
+                scope_product_df, ["PPG", "PPG_NAME", "PPG Name"]
+            )
+            if not scope_ppg_col:
+                context["warning"] = (
+                    "Could not find the PPG column in the selected scope sheet. Please identify it."
+                )
+                return render(request, "deck/PREQC_BPRV.html", context)
+
+            scope_brand_col = selected_scope_brand_column or _find_column_by_candidates(scope_product_df, ["Brand"])
+            if not scope_brand_col:
+                context["warning"] = (
+                    "Could not find the Brand column in the selected scope sheet. Please identify it."
+                )
+                return render(request, "deck/PREQC_BPRV.html", context)
+
+            context["selected_scope_ppg_column"] = scope_ppg_col
+            context["selected_scope_brand_column"] = scope_brand_col
+            brand_map = (
+                scope_product_df[[scope_ppg_col, scope_brand_col]]
+                .rename(columns={scope_ppg_col: "PPG", scope_brand_col: "Brand"})
+                .dropna(subset=["PPG", "Brand"])
+            )
+            brand_map["__ppg_key"] = brand_map["PPG"].map(_normalized_text)
+            brand_map = brand_map.drop_duplicates("__ppg_key")
+
+            merged["__ppg_key"] = merged["PPG"].map(_normalized_text)
+            merged = merged.merge(brand_map[["__ppg_key", "Brand"]], on="__ppg_key", how="left")
+
+        merged = merged.dropna(subset=["PPG", "Brand"])
+
+        grouped = (
+            merged.groupby(["Geography", "PPG"], dropna=False)
+            .apply(
+                lambda g: pd.concat(
+                    [
+                        pd.Series(
+                            {
+                                "correlation": _safe_group_correlation(g, "Sales", "BPRV"),
+                                "total_sales": pd.to_numeric(g["Sales"], errors="coerce").sum(),
+                                "n_rows": len(g),
+                            }
+                        ),
+                        _sales_spike_metrics(g, "Sales", "BPRV"),
+                    ]
+                )
+            )
+            .reset_index()
+            .dropna(subset=["correlation"])
+            .sort_values(by=["correlation", "total_sales"], ascending=[False, False])
+        )
+
+        grouped = grouped.sort_values(
+            by=["total_sales", "correlation", "spike_lift_pct", "n_rows", "slope"],
+            ascending=[False, False, False, False, False],
+        )
+
+        top_results = grouped.head(20).copy()
+        top_results["correlation"] = pd.to_numeric(top_results["correlation"], errors="coerce").round(3)
+        top_results["slope"] = pd.to_numeric(top_results["slope"], errors="coerce").round(4)
+        top_results["spike_lift_pct"] = pd.to_numeric(top_results["spike_lift_pct"], errors="coerce").round(2)
+
+        chart_entries: list[dict[str, object]] = []
+        for _, row in top_results.iterrows():
+            subset = merged[(merged["Geography"] == row["Geography"]) & (merged["PPG"] == row["PPG"])].copy()
+            if subset.empty:
+                continue
+            if "Week" not in subset.columns:
+                subset["Week"] = [f"W{i+1}" for i in range(len(subset))]
+            else:
+                as_dt = pd.to_datetime(subset["Week"], errors="coerce")
+                if as_dt.notna().sum() >= max(2, len(subset) // 2):
+                    subset["__week_sort"] = as_dt
+                    subset = subset.sort_values("__week_sort")
+                    subset["Week"] = subset["__week_sort"].dt.strftime("%Y-%m-%d")
+                else:
+                    subset["Week"] = subset["Week"].astype(str)
+
+            subset["Sales"] = pd.to_numeric(subset["Sales"], errors="coerce")
+            subset["BPRV"] = pd.to_numeric(subset["BPRV"], errors="coerce")
+            subset = subset.dropna(subset=["Sales", "BPRV"]).reset_index(drop=True)
+            if subset.empty:
+                continue
+
+            width, height = 420, 180
+            pad_left, pad_right, pad_top, pad_bottom = 40, 40, 15, 30
+            plot_w = width - pad_left - pad_right
+            plot_h = height - pad_top - pad_bottom
+
+            def _points(values: list[float]) -> str:
+                if len(values) == 1:
+                    xs = [pad_left + plot_w / 2]
+                else:
+                    xs = [pad_left + (plot_w * i / (len(values) - 1)) for i in range(len(values))]
+                v_min = min(values)
+                v_max = max(values)
+                if abs(v_max - v_min) < 1e-12:
+                    ys = [pad_top + plot_h / 2 for _ in values]
+                else:
+                    ys = [pad_top + plot_h - ((v - v_min) / (v_max - v_min) * plot_h) for v in values]
+                return " ".join(f"{x:.2f},{y:.2f}" for x, y in zip(xs, ys))
+
+            sales_values = subset["Sales"].tolist()
+            bprv_values = subset["BPRV"].tolist()
+            chart_entries.append(
+                {
+                    "geography": row["Geography"],
+                    "ppg": row["PPG"],
+                    "week_start": subset["Week"].iloc[0],
+                    "week_end": subset["Week"].iloc[-1],
+                    "sales_line": _points(sales_values),
+                    "bprv_line": _points(bprv_values),
+                    "sales_min": round(float(min(sales_values)), 2),
+                    "sales_max": round(float(max(sales_values)), 2),
+                    "bprv_min": round(float(min(bprv_values)), 2),
+                    "bprv_max": round(float(max(bprv_values)), 2),
+                }
+            )
+
+        report_buffer = io.BytesIO()
+        with pd.ExcelWriter(report_buffer, engine="openpyxl") as writer:
+            grouped.to_excel(writer, index=False, sheet_name="PreQC_BPRV_Correlation")
+        report_bytes = report_buffer.getvalue()
+
+        context["top_results"] = top_results.to_dict("records")
+        context["chart_entries"] = chart_entries
+        context["correlation_intro"] = (
+            "Here we check the correlation between Sales and BPRV and rank the top PPG + Geography "
+            "combinations by Total Sales, Correlation, Spike Lift, Active Weeks, and Slope."
+        )
+        request.session["preqc_bprv_report"] = base64.b64encode(report_bytes).decode("ascii")
+        request.session.modified = True
+
+    elif request.method == "GET" and (request.GET.get("action") or "").lower() == "download_report":
+        encoded = request.session.get("preqc_bprv_report")
+        if encoded:
+            response = HttpResponse(
+                base64.b64decode(encoded),
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            response["Content-Disposition"] = 'attachment; filename="preqc_bprv_full_report.xlsx"'
+            return response
+
+    return render(request, "deck/PREQC_BPRV.html", context)
 def generate_deck(
     n_clicks,
     data_contents,
